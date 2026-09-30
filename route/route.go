@@ -30,8 +30,8 @@ func SetupRouter() *gin.Engine {
 	boss := router.Group("/api/boss", middleware.BossAuth)
 	{
 		bossController := controller.NewBossController()
-		boss.POST("/login", bossController.AdminLogin)  // login 在 BossAuth 白名单里放行
-		boss.GET("/logout", bossController.AdminLogout) // logout 在 BossAuth 白名单里放行
+		boss.POST("/login", middleware.LoginRateLimit(), bossController.AdminLogin) // login 在 BossAuth 白名单里放行;额外挂 IP 限流挡爆破
+		boss.GET("/logout", bossController.AdminLogout)                             // logout 在 BossAuth 白名单里放行
 		boss.GET("/auth/user", bossController.AuthUser)
 
 		tg := controller.NewTgController()
@@ -76,6 +76,9 @@ func SetupRouter() *gin.Engine {
 		boss.GET("/DelTgCommand", tg.DelTgCommand)
 		// 改完命令后刷新原生「菜单」按钮
 		boss.POST("/SyncTgCommand", tgBot.SyncCommands)
+		// 机器人资料(名称/简介):存库回显 + 通过 Bot API setMyName/setMyShortDescription/setMyDescription 同步(头像无接口,只能 @BotFather)
+		boss.POST("/SaveBotProfile", tgBot.SaveBotProfile)
+		boss.GET("/GetBotProfile", tgBot.GetBotProfile)
 	}
 
 	// Telegram 回调：公开组，不挂 BossAuth，用 secret token 头校验

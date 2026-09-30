@@ -41,11 +41,38 @@
         </el-form>
       </div>
     </el-card>
+
+    <!--机器人资料:名称/简介走 Bot API 同步(头像无接口,只能 @BotFather 手动换)-->
+    <el-card shadow="always" class="bot-profile-card">
+      <div slot="header" class="setting-header">
+        <span>机器人资料</span>
+      </div>
+      <div class="setting-form" v-loading="botLoading">
+        <el-form label-width="90px" @submit.native.prevent>
+          <el-form-item label="名称">
+            <el-input v-model="botForm.name" maxlength="64" show-word-limit placeholder="机器人显示名称(setMyName)"></el-input>
+          </el-form-item>
+          <el-form-item label="短简介">
+            <el-input v-model="botForm.shortDescription" type="textarea" :rows="4" maxlength="120" show-word-limit placeholder="显示在资料页的「简介」（≤120字），可多行"></el-input>
+          </el-form-item>
+          <el-form-item label="欢迎语">
+            <el-input v-model="botForm.description" type="textarea" :rows="2" maxlength="512" show-word-limit placeholder="开场欢迎语（≤512字），可多行"></el-input>
+          </el-form-item>
+          <el-form-item label="头像">
+            <span class="setting-tip" style="margin-left:0;font-size:14px;color:#E6A23C;">头像无法通过接口修改，请到 <b>@BotFather</b> 用 <code>/setbotphoto</code> 手动上传。</span>
+          </el-form-item>
+          <el-form-item class="setting-submit">
+            <el-button type="primary" icon="el-icon-check" :loading="botSaving" @click="doSaveBotProfile">保存并同步到 Telegram</el-button>
+            <el-button icon="el-icon-download" :loading="botLoading" @click="fetchBotProfile">拉取当前</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script>
-import {getSysSettingMap, saveSysSettingBatch} from "@/api/sysSetting";
+import {getSysSettingMap, saveSysSettingBatch, getBotProfile, saveBotProfile} from "@/api/sysSetting";
 
 export default {
   name: "SysSetting",
@@ -62,10 +89,13 @@ export default {
           placeholder: '例如 7569435732',
           name: '图片库中转 ChatID',
           remark: '入库时把图发给它换取 Telegram file_id，再删除该消息',
-          tip: '入库图片时先发给这个 chat 换取 Telegram file_id，随后自动删除该消息；须填 bot 能主动发消息的对象（一般是你自己的私聊 chat_id）。',
         },
       ],
       form: {},
+      // 机器人资料(名称/短简介/简介):存库回显 + 同步 Telegram;头像无接口
+      botLoading: false,
+      botSaving: false,
+      botForm: {name: '', shortDescription: '', description: ''},
     }
   },
   created() {
@@ -88,6 +118,10 @@ export default {
               this.$set(this.form, item.key, item.type === 'number' ? (Number(map[item.key]) || 0) : map[item.key])
             }
           })
+          // 机器人资料回显(与上面同一次 map 拉取,无额外网络)
+          if (map.botName !== undefined) this.botForm.name = map.botName
+          if (map.botShortDescription !== undefined) this.botForm.shortDescription = map.botShortDescription
+          if (map.botDescription !== undefined) this.botForm.description = map.botDescription
         } else {
           this.$message.error(res.data.message)
         }
@@ -117,6 +151,44 @@ export default {
         this.$message.error(e.message)
       } finally {
         this.saving = false
+      }
+    },
+    // 从 Telegram 拉取当前机器人资料回填(尽力而为,失败项给提示)
+    async fetchBotProfile() {
+      this.botLoading = true
+      try {
+        const res = await getBotProfile()
+        const d = (res.data && res.data.data) || {}
+        if (d.name) this.botForm.name = d.name
+        if (d.shortDescription) this.botForm.shortDescription = d.shortDescription
+        if (d.description) this.botForm.description = d.description
+        const failed = (res.data && res.data.failed) || []
+        if (failed.length) this.$message.warning(res.data.message)
+        else this.$message.success(res.data.message)
+      } catch (e) {
+        this.$message.error(e.message)
+      } finally {
+        this.botLoading = false
+      }
+    },
+    // 保存并同步到 Telegram(留空项后端会跳过)
+    async doSaveBotProfile() {
+      this.botSaving = true
+      try {
+        const res = await saveBotProfile({
+          name: this.botForm.name,
+          shortDescription: this.botForm.shortDescription,
+          description: this.botForm.description,
+        })
+        if (res.data.code === 0) {
+          this.$message.success(res.data.message)
+        } else {
+          this.$message({type: 'warning', message: res.data.message, duration: 6000})
+        }
+      } catch (e) {
+        this.$message.error(e.message)
+      } finally {
+        this.botSaving = false
       }
     }
   }

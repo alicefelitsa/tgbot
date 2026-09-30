@@ -31,9 +31,10 @@ var tgTokenPattern = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{20,}$`)
 // 硬性要求:耗时逻辑(查库/调 Telegram)全部在 consume goroutine 里做,绝不阻塞通道层。
 
 type TgBotRuntime struct {
-	db    *gorm.DB
-	bot   *tg.BotAPI
-	queue chan *tg.Update
+	db  *gorm.DB
+	bot *tg.BotAPI
+	// shards 按 chat_id 分片的更新队列:同会话恒定落同一分片(片内串行保序),跨分片并行消费
+	shards []chan *tg.Update
 	// awaitMu 保护 awaitInput:用户「正在等待输入」状态(内存态,重启丢失用户重新点一次即可)
 	awaitMu     sync.Mutex
 	awaitInputs map[int64]*awaitInput
@@ -81,8 +82,24 @@ func NewTgBotRuntime() *TgBotRuntime {
 	if queueCap <= 0 {
 		queueCap = 1000
 	}
-	r := &TgBotRuntime{db: config.Mysql, bot: bot, queue: make(chan *tg.Update, queueCap), awaitInputs: map[int64]*awaitInput{}}
-	go r.consume() // 启动分发循环(长驻 goroutine)
+	// 按 chat_id 分片并发:同一会话(私聊/群)恒定路由到同一分片、片内串行保证消息顺序;
+	// 不同会话分散到不同分片并行消费,单条耗时的 Telegram 调用不再堵住整条队列。
+	shardCount := config.Conf.GetInt("server.shardCount")
+	if shardCount <= 0 {
+		shardCount = 8
+	}
+	perShardCap := queueCap / shardCount
+	if perShardCap < 1 {
+		perShardCap = 1
+	}
+	shards := make([]chan *tg.Update, shardCount)
+	for i := range shards {
+		shards[i] = make(chan *tg.Update, perShardCap)
+	}
+	r := &TgBotRuntime{db: config.Mysql, bot: bot, shards: shards, awaitInputs: map[int64]*awaitInput{}}
+	for _, sh := range shards {
+		go r.consume(sh) // 每个分片一个消费 goroutine(长驻)
+	}
 	// 图片库预览缓存启动清扫:删掉库里已无对应的孤儿缓存文件,防磁盘泄漏(打库+读目录,放 goroutine 不阻塞启动)
 	go func() {
 		defer func() {
@@ -121,20 +138,57 @@ func (r *TgBotRuntime) Webhook(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
-	select {
-	case r.queue <- &up:
-	default: // 队列满丢弃,别阻塞通道层
-		config.LogWarning("tg queue full, drop %d", up.UpdateID)
-	}
+	r.enqueue(&up)                                 // 按 chat_id 路由到对应分片(片满则丢弃,绝不阻塞通道层)
 	c.JSON(200, gin.H{"code": 0, "message": "ok"}) // 恒 200
 }
 
-// consume 分发层:串行消费队列,把每条 Update 交给对应处理器。
-// 每条单独 recover:避免某条消息处理 panic 拖垮整个分发循环(否则后续所有消息都不再被处理)。
-func (r *TgBotRuntime) consume() {
-	for up := range r.queue {
+// consume 分发层:消费单个分片队列,把每条 Update 交给对应处理器。
+// 每个分片各起一个 goroutine:片内串行(保证同一会话消息顺序),跨片并行(互不阻塞)。
+// handleUpdate 内部逐条 recover,避免某条 panic 拖垮该分片循环(否则该分片后续消息都不再处理)。
+func (r *TgBotRuntime) consume(shard chan *tg.Update) {
+	for up := range shard {
 		r.handleUpdate(up)
 	}
+}
+
+// enqueue 按 chat_id 把 Update 路由到固定分片;分片满则丢弃并告警(绝不阻塞通道层)。
+func (r *TgBotRuntime) enqueue(up *tg.Update) {
+	idx := shardIndex(updateChatID(up), len(r.shards))
+	select {
+	case r.shards[idx] <- up:
+	default:
+		config.LogWarning("tg shard %d full, drop %d", idx, up.UpdateID)
+	}
+}
+
+// shardIndex 计算某 chat_id 应落到的分片下标。用 uint64 归一化(群/频道 chat_id 为负数也能稳定映射),
+// 保证同一 chat_id 恒定命中同一分片 → 会话内消息严格有序。
+func shardIndex(chatID int64, n int) int {
+	if n <= 1 {
+		return 0
+	}
+	return int(uint64(chatID) % uint64(n))
+}
+
+// updateChatID 从 Update 中尽力取出会话 chat_id 用于分片路由;取不到返回 0(落 0 号分片,不影响正确性)。
+func updateChatID(up *tg.Update) int64 {
+	switch {
+	case up.Message != nil && up.Message.Chat != nil:
+		return up.Message.Chat.ID
+	case up.EditedMessage != nil && up.EditedMessage.Chat != nil:
+		return up.EditedMessage.Chat.ID
+	case up.ChannelPost != nil && up.ChannelPost.Chat != nil:
+		return up.ChannelPost.Chat.ID
+	case up.EditedChannelPost != nil && up.EditedChannelPost.Chat != nil:
+		return up.EditedChannelPost.Chat.ID
+	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat != nil:
+		return up.CallbackQuery.Message.Chat.ID
+	case up.MyChatMember != nil:
+		return up.MyChatMember.Chat.ID
+	case up.ChatMember != nil:
+		return up.ChatMember.Chat.ID
+	}
+	return 0
 }
 
 // handleUpdate 处理单条 Update,带 panic 兜底
@@ -994,7 +1048,7 @@ func (r *TgBotRuntime) SendChatMessage(c *gin.Context) {
 // ==================== 本地 getUpdates 长轮询调试入口(配置开关) ====================
 
 // startPolling 本地先用 getUpdates 长轮询验证 token(§8:webhook 与 getUpdates 互斥)。
-// 由 telegram.debugPolling=true 开启;取到的 Update 同样丢进 r.queue,复用分发层逻辑。
+// 由 telegram.debugPolling=true 开启;取到的 Update 同样经 enqueue 丢进对应分片,复用分发层逻辑。
 func (r *TgBotRuntime) startPolling() {
 	if r.bot == nil {
 		config.LogWarning("tg 轮询跳过:bot 未初始化")
@@ -1010,11 +1064,7 @@ func (r *TgBotRuntime) startPolling() {
 	config.LogInfo("tg 本地长轮询已启动(getUpdates 调试模式)")
 	for up := range updates {
 		item := up
-		select {
-		case r.queue <- &item:
-		default:
-			config.LogWarning("tg queue full(polling), drop %d", item.UpdateID)
-		}
+		r.enqueue(&item) // 与 webhook 通道共用按 chat_id 的分片路由
 	}
 }
 

@@ -55,6 +55,13 @@ service.interceptors.response.use(response => {
             } else {
                 Message.error('网络连接异常，请检查网络设置');
             }
+        } else {
+            // 有 HTTP 响应但状态码非 2xx(如登录限流 429):用后端返回体里的中文 message
+            // 覆盖 axios 默认的 "Request failed with status code XXX",让各页面 catch(e) 直接显示友好提示。
+            const serverMsg = error.response.data && error.response.data.message;
+            if (serverMsg) {
+                error.message = serverMsg;
+            }
         }
         return Promise.reject(error);
     }
