@@ -1,0 +1,44 @@
+# ==================== IDE ====================
+.idea/
+.vscode/
+*.iml
+
+# ==================== Go 构建产物 ====================
+# 编译出的可执行文件(Windows/Linux)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+tgbot
+tgbot.exe
+# go test / cover 临时物
+*.test
+*.out
+coverage.out
+
+# ==================== 前端 (Vue CLI) ====================
+web/admin/node_modules/
+web/admin/dist/
+web/admin/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==================== 运行时产物 ====================
+# 日志
+logs/
+*.log
+# 图片库预览的本地磁盘缓存(运行时生成,可随时重建)
+data/imgcache/
+
+# ==================== 操作系统 ====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================== 说明 ====================
+# 注:按仓库所有者决定,config.yaml(含 botToken / secretKey 等真实密钥)仍纳入版本控制。
+# 若日后要撤回:git rm --cached config.yaml 再提交;但已推送的历史仍含密钥,
+#            公开仓库下须去 BotFather 重置 token、更换 JWT secretKey 才算真正止损。

@@ -1,0 +1,61 @@
+# ===========================
+# 服务器端口配置
+# ===========================
+server:
+  # Web服务端口
+  webPort: 8200
+  # 限流队列容量
+  queueCapacity: 1000
+  # 限流突发容量
+  suddenCapacity: 2000
+
+# ===========================
+# MySQL数据库配置
+# ===========================
+mysql:
+  # 数据库地址
+  address: "82.158.225.190:3306"
+  # 数据库名称
+  database: "tgbot"
+  # 数据库用户
+  user: "tgbot"
+  # 数据库密码
+  password: "@Tt37233535"
+
+# ===========================
+# JWT登录鉴权配置
+# ===========================
+jwt:
+  # 签名密钥，务必修改为随机长字符串并妥善保管
+  secretKey: "b34253853b8466c73d232c2f716c5c0e417b9f79a44a3ae6ad695914f25d87f"
+  # token有效期（小时）
+  expireHours: 72
+
+# ===========================
+# Redis配置（初稿暂未使用，保留与 shortplay 一致的结构）
+# ===========================
+redis:
+  # Redis服务器地址
+  address: "localhost:6379"
+  # 密码，没有则为空
+  password: ""
+  # 默认数据库
+  db: 0
+
+# ===========================
+# Telegram 机器人配置
+# ===========================
+telegram:
+  botToken: "8686069122:AAEnl21vArtsqlRvg-52T0c18y0iR5pdPtw"          # BotFather 拿的 token，待填
+  webhookPath: "/api/tg/webhook"
+  secretToken: "dev_placeholder_change_me_3f9a1c"          # 校验回调来源，防伪造（上线切 webhook 时换成随机长串，启动会自动以该值注册）
+  publicBase: "https://www.bot-tg.cc"       # 注册 webhook 用的公网 HTTPS 域名（debugPolling=false 时启动会自动 SetWebhook(publicBase+webhookPath)）
+  # 本地调试开关：true=用 getUpdates 长轮询(无需公网 HTTPS/域名，需能出站访问 api.telegram.org)
+  # 上线走 webhook 时置 false：启动时自动注册 webhook(需 publicBase 为真实可被 Telegram 访问的 HTTPS 域名)。二者互斥，轮询模式启动会自动先 deleteWebhook。
+  debugPolling: true
+  # 图片库入库中转 chat：往这个 chat 发一张图、读回 Telegram 的 file_id 后再删除该消息，用于「图片库」换取可复用的 file_id。
+  # 必须是 bot 能主动发消息的对象(例：你自己的 TG 私聊 chat_id)；换 bot 后 file_id 失效需重新入库。
+  # 注：运行时以数据库「系统设置」的 imageRelayChatID 为准(后台改完即生效)，本行仅当库中无值时兜底。
+  imageRelayChatID: 7569435732
+  # 图片库预览的本地磁盘缓存目录:按 file_id 缓存从 Telegram 下载的原图字节,命中则不再重复拉取。留空则默认 ./data/imgcache。
+  imageCacheDir: "data/imgcache"
