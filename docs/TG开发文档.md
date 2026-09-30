@@ -1314,6 +1314,18 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
 - **后续修正(右侧空白)**:固定 88px 格子 + flex-wrap 会在行尾留一条 ~80px 空白(6 个 88px 铺不满 660px 容器)。改为 CSS Grid `grid-template-columns: repeat(auto-fill, minmax(88px, 1fr))` + `align-content:start`,`.up-mini` 宽 100%、el-image `width:100%`,每列 1fr 拉伸铺满整行,消除右侧空白(列数仍按容器宽自适应)。
 - **后续修正(横向滚动条)**:改 1fr 拉伸后底部冒出横向滚动条。根因:el-image 有 `border:1px` 但未设 `box-sizing:border-box`,`width:100%` 再加左右边框 = 比格子宽 2px;且 `overflow-y:auto` 会使另一轴 `visible` 计算为 `auto`→ 触发横滚。修:el-image 加 `box-sizing:border-box`;网格显式 `overflow-x:hidden` 并把 `padding-right` 6px→12px(兼顾最右列 ✕ 角标 overhang 不被裁)。
 
+### 2026-09-30 · 规范 · 数据库全表逐列 + 表本身加中文注释
+- **背景**:用户要求给数据库所有表加中文注释(便于 GoLand/IDE 与运维阅读 schema)。共 8 张表:admin/sys_setting/tg_chat/tg_command/tg_handler/tg_image/tg_menu/tg_user。
+- **做法**:MySQL 加列注释必须用 `ALTER TABLE ... MODIFY COLUMN`(需原样带上类型/NULL/默认值,写错会改坏列)。故先用临时 Go 程序 `show create table` dump 出真实列定义,再逐表生成一条合并 ALTER(多个 MODIFY + 末尾 `COMMENT='表注释'`),临时程序跑完即删。未用 AutoMigrate。
+- **验证**:8 条 ALTER 均 `ok=8 err=0`;再查 `information_schema.columns/tables` 确认 68 列全有注释、8 表全有表注释。同步把附录 A 建表 SQL 逐列逐表补上 COMMENT并新增缺失的 tg_chat 建表段,保证新装库与线上一致。
+- **注**:纯 DDL 元数据变更(只改注释、不动数据/类型),无需重编译重启后端。
+
+### 2026-09-30 · 规范 · 索引补中文注释(命名索引 8 个)
+- **背景**:上轮只加了列注释 + 表注释,索引注释未动。用户追问后查 `information_schema.statistics`,发现 16 个索引中 8 个命名索引全缺注释(另有 8 个 PRIMARY 主键)。
+- **范围**:6 个唯一索引(uk_account/uk_skey/uk_chat/uk_cmd/uk_key/uk_tg)+ 2 个普通索引(idx_tag/idx_parent)全部补注释;8 个主键跳过——MySQL 不支持给 PRIMARY 设 COMMENT,且 `id 主键`本不言自明。
+- **做法**:MySQL 无「只改索引注释」语法,只能同一条 ALTER 里 `DROP INDEX x, ADD [UNIQUE] INDEX x (cols) COMMENT '...'` 先删后建。表都很小(最大百余行),重建毫秒级、同语句内完成,安全。临时 Go 程序执行、跑完即删。
+- **验证**:8 条 ALTER 均成功;再查 `information_schema.statistics` 确认 `NAMED_IDX=8 missing=0`。附录 A 建表 SQL 的索引也同步逐条加上 `COMMENT`(用各表独有的结尾 ENGINE 行做上下文,避开 §3 同名示意 DDL)。
+
 ### 运维备忘
 - **端口占用**:调试残留的 `tgbot.exe` 会占 8200,报 `bind ... Only one usage of each socket address`;`Stop-Process -Name tgbot` 释放。
 - **单实例**:getUpdates 长轮询同一 bot **同时只能跑一个进程**,否则抢更新 + 撞端口;调试固定用 GoLand 的 Run。
@@ -1337,98 +1349,111 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
 ```sql
 -- ---------- 1. 菜单树 ----------
 CREATE TABLE IF NOT EXISTS tg_menu (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  parent_id     BIGINT      NOT NULL DEFAULT 0,
-  lang          VARCHAR(8)  NOT NULL DEFAULT 'all',
-  title         VARCHAR(64) NOT NULL,
-  action_type   VARCHAR(16) NOT NULL DEFAULT 'menu',
-  action_config JSON        NULL,
-  cols          TINYINT     NOT NULL DEFAULT 2,
-  sort          INT         NOT NULL DEFAULT 0,
-  status        TINYINT     NOT NULL DEFAULT 1,
-  created_at    DATETIME    NULL,
-  updated_at    DATETIME    NULL,
-  KEY idx_parent (parent_id, status, sort)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  parent_id     BIGINT      NOT NULL DEFAULT 0     COMMENT '父菜单ID(0=根菜单)',
+  lang          VARCHAR(8)  NOT NULL DEFAULT 'all'  COMMENT '语言(all=全部语言)',
+  title         VARCHAR(64) NOT NULL                COMMENT '菜单按钮文案',
+  action_type   VARCHAR(16) NOT NULL DEFAULT 'menu' COMMENT '动作类型:menu/text/url/handler/http',
+  action_config JSON        NULL                    COMMENT '动作配置(JSON,随 action_type 而异)',
+  cols          TINYINT     NOT NULL DEFAULT 2      COMMENT '每行按钮列数',
+  sort          INT         NOT NULL DEFAULT 0      COMMENT '排序(升序)',
+  status        TINYINT     NOT NULL DEFAULT 1      COMMENT '状态:1=启用,0=禁用',
+  created_at    DATETIME    NULL                    COMMENT '创建时间',
+  updated_at    DATETIME    NULL                    COMMENT '更新时间',
+  KEY idx_parent (parent_id, status, sort) COMMENT '按父菜单查子级(父ID+状态+排序)'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='机器人菜单树(可视化九宫格菜单)';
 
 -- ---------- 2. 动态数据类白名单 ----------
 CREATE TABLE IF NOT EXISTS tg_handler (
-  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
-  handler_key VARCHAR(64)  NOT NULL,
-  name        VARCHAR(64)  NOT NULL,
-  param_hint  VARCHAR(255) NOT NULL DEFAULT '',
-  remark      VARCHAR(255) NOT NULL DEFAULT '',
-  status      TINYINT      NOT NULL DEFAULT 1,
-  created_at  DATETIME     NULL,
-  updated_at  DATETIME     NULL,
-  UNIQUE KEY uk_key (handler_key)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  handler_key VARCHAR(64)  NOT NULL              COMMENT '数据类标识(对应代码 RegisterTg 的 key)',
+  name        VARCHAR(64)  NOT NULL              COMMENT '中文名',
+  param_hint  VARCHAR(255) NOT NULL DEFAULT ''   COMMENT '参数示例提示(如 limit=5)',
+  remark      VARCHAR(255) NOT NULL DEFAULT ''   COMMENT '备注说明',
+  status      TINYINT      NOT NULL DEFAULT 1    COMMENT '状态:1=启用,0=禁用',
+  created_at  DATETIME     NULL                  COMMENT '创建时间',
+  updated_at  DATETIME     NULL                  COMMENT '更新时间',
+  UNIQUE KEY uk_key (handler_key) COMMENT '数据类标识唯一'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='动态数据类白名单(供菜单 action_type=handler 选用)';
 
 -- ---------- 3. Telegram 用户 ----------
 CREATE TABLE IF NOT EXISTS tg_user (
-  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
-  tg_user_id   BIGINT      NOT NULL,
-  chat_id      BIGINT      NOT NULL,
-  username     VARCHAR(64) NOT NULL DEFAULT '',
-  first_name   VARCHAR(64) NOT NULL DEFAULT '',
-  lang         VARCHAR(8)  NOT NULL DEFAULT 'en',
-  bind_user_id BIGINT      NOT NULL DEFAULT 0,
-  status       TINYINT     NOT NULL DEFAULT 1,
-  created_at   DATETIME    NULL,
-  updated_at   DATETIME    NULL,
-  UNIQUE KEY uk_tg (tg_user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id           BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  tg_user_id   BIGINT      NOT NULL              COMMENT 'Telegram 用户ID',
+  chat_id      BIGINT      NOT NULL              COMMENT '私聊 chat_id(发消息用)',
+  username     VARCHAR(64) NOT NULL DEFAULT ''   COMMENT 'Telegram 用户名',
+  first_name   VARCHAR(64) NOT NULL DEFAULT ''   COMMENT '名字',
+  lang         VARCHAR(8)  NOT NULL DEFAULT 'en' COMMENT '语言代码',
+  bind_user_id BIGINT      NOT NULL DEFAULT 0    COMMENT '绑定的业务系统账号ID(预留,0=未绑定)',
+  status       TINYINT     NOT NULL DEFAULT 1    COMMENT '状态:1=正常,0=已屏蔽bot不可推送',
+  created_at   DATETIME    NULL                  COMMENT '首次交互时间',
+  updated_at   DATETIME    NULL                  COMMENT '最近更新时间',
+  UNIQUE KEY uk_tg (tg_user_id) COMMENT 'Telegram用户ID唯一'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram 用户(bot 交互过的用户)';
 
 -- ---------- 4. 后台管理员 ----------
 CREATE TABLE IF NOT EXISTS admin (
-  id         BIGINT PRIMARY KEY AUTO_INCREMENT,
-  account    VARCHAR(64) NOT NULL,
-  password   VARCHAR(64) NOT NULL,
-  status     TINYINT     NOT NULL DEFAULT 1,
-  created_at DATETIME    NULL,
-  updated_at DATETIME    NULL,
-  UNIQUE KEY uk_account (account)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  account    VARCHAR(64) NOT NULL              COMMENT '登录账号',
+  password   VARCHAR(64) NOT NULL              COMMENT '登录密码(明文存储)',
+  status     TINYINT     NOT NULL DEFAULT 1    COMMENT '状态:1=启用,0=禁用',
+  created_at DATETIME    NULL                  COMMENT '创建时间',
+  updated_at DATETIME    NULL                  COMMENT '更新时间',
+  UNIQUE KEY uk_account (account) COMMENT '登录账号唯一'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台管理员账号';
 
 -- ---------- 5. 命令菜单(原生「菜单」按钮) ----------
 CREATE TABLE IF NOT EXISTS tg_command (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  command       VARCHAR(32) NOT NULL,
-  description   VARCHAR(64) NOT NULL,
-  action_type   VARCHAR(16) NOT NULL DEFAULT 'menu',
-  action_config JSON        NULL,
-  sort          INT         NOT NULL DEFAULT 0,
-  status        TINYINT     NOT NULL DEFAULT 1,
-  created_at    DATETIME    NULL,
-  updated_at    DATETIME    NULL,
-  UNIQUE KEY uk_cmd (command)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  command       VARCHAR(32) NOT NULL                COMMENT '命令名(不含斜杠,如 start)',
+  description   VARCHAR(64) NOT NULL                COMMENT '命令描述(显示在 TG 命令列表)',
+  action_type   VARCHAR(16) NOT NULL DEFAULT 'menu' COMMENT '动作类型:menu/text/url/handler/http',
+  action_config JSON        NULL                    COMMENT '动作配置(JSON,随 action_type 而异)',
+  sort          INT         NOT NULL DEFAULT 0      COMMENT '排序(升序)',
+  status        TINYINT     NOT NULL DEFAULT 1      COMMENT '状态:1=启用,0=禁用',
+  created_at    DATETIME    NULL                    COMMENT '创建时间',
+  updated_at    DATETIME    NULL                    COMMENT '更新时间',
+  UNIQUE KEY uk_cmd (command) COMMENT '命令名唯一'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='命令菜单(原生菜单按钮里的斜杠命令)';
 
 -- ---------- 6. 图片库(存 Telegram file_id,供各处配图复用) ----------
 CREATE TABLE IF NOT EXISTS tg_image (
-  id         BIGINT PRIMARY KEY AUTO_INCREMENT,
-  name       VARCHAR(191)  NOT NULL DEFAULT '',
-  tag        VARCHAR(64)   NOT NULL DEFAULT '',
-  tg_file_id VARCHAR(512)  NOT NULL DEFAULT '',
-  mime       VARCHAR(64)   NOT NULL DEFAULT '',
-  size       INT           NOT NULL DEFAULT 0,
-  source_url VARCHAR(1024) NOT NULL DEFAULT '',
-  status     TINYINT       NOT NULL DEFAULT 1,
-  created_at DATETIME      NULL,
-  updated_at DATETIME      NULL,
-  KEY idx_tag (tag)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  name       VARCHAR(191)  NOT NULL DEFAULT '' COMMENT '图片名称(便于识别与搜索)',
+  tag        VARCHAR(64)   NOT NULL DEFAULT '' COMMENT '标签/分类(可空)',
+  tg_file_id VARCHAR(512)  NOT NULL DEFAULT '' COMMENT 'Telegram file_id(发送时直接引用,免重复上传)',
+  mime       VARCHAR(64)   NOT NULL DEFAULT '' COMMENT '图片 MIME 类型',
+  size       INT           NOT NULL DEFAULT 0  COMMENT '图片字节大小',
+  source_url VARCHAR(1024) NOT NULL DEFAULT '' COMMENT '来源直链(URL 导入时记录,可空)',
+  status     TINYINT       NOT NULL DEFAULT 1  COMMENT '状态:1=启用,0=禁用',
+  created_at DATETIME      NULL                COMMENT '入库时间',
+  updated_at DATETIME      NULL                COMMENT '更新时间',
+  KEY idx_tag (tag) COMMENT '按标签查图'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图片库(存 Telegram file_id,供各处配图复用)';
 
 -- ---------- 7. 系统设置(运行时配置 key-value,后台可改、改完即生效) ----------
 CREATE TABLE IF NOT EXISTS sys_setting (
-  id         BIGINT PRIMARY KEY AUTO_INCREMENT,
-  skey       VARCHAR(64)  NOT NULL DEFAULT '',
-  svalue     TEXT         NULL,
-  name       VARCHAR(191) NOT NULL DEFAULT '',
-  remark     VARCHAR(255) NOT NULL DEFAULT '',
-  updated_at DATETIME     NULL,
-  UNIQUE KEY uk_skey (skey)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  skey       VARCHAR(64)  NOT NULL DEFAULT ''  COMMENT '设置键(程序读取用的唯一标识)',
+  svalue     TEXT         NULL                 COMMENT '设置值',
+  name       VARCHAR(191) NOT NULL DEFAULT ''  COMMENT '设置名称(后台展示)',
+  remark     VARCHAR(255) NOT NULL DEFAULT ''  COMMENT '备注说明',
+  updated_at DATETIME     NULL                 COMMENT '更新时间',
+  UNIQUE KEY uk_skey (skey) COMMENT '设置键唯一'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统设置(运行时配置 key-value,后台可改、改完即生效)';
+
+-- ---------- 8. Telegram 群组/频道(bot 被拉进群时自动落库) ----------
+CREATE TABLE IF NOT EXISTS tg_chat (
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  chat_id    BIGINT       NOT NULL              COMMENT 'Telegram 群组/频道ID(通常为负数)',
+  title      VARCHAR(255) NOT NULL DEFAULT ''   COMMENT '群组/频道标题',
+  username   VARCHAR(64)  NOT NULL DEFAULT ''   COMMENT '群组公开用户名(可空)',
+  type       VARCHAR(16)  NOT NULL DEFAULT ''   COMMENT '类型:group/supergroup/channel',
+  status     TINYINT      NOT NULL DEFAULT 1    COMMENT '状态:1=bot在群可推送,0=已离开或失效',
+  created_at DATETIME     NULL                  COMMENT '首次捕获时间',
+  updated_at DATETIME     NULL                  COMMENT '最近更新时间',
+  UNIQUE KEY uk_chat (chat_id) COMMENT '群组chat_id唯一(每群一条)'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram 群组/频道(bot 被拉进群时自动落库,供后台选群群发)';
 
 -- 首条:图片库中转 ChatID(须是 bot 能主动发消息的对象;为空则回落 config.yaml.telegram.imageRelayChatID)
 INSERT INTO sys_setting (skey, svalue, name, remark, updated_at) VALUES
