@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -64,7 +65,7 @@ func (r *TgBotRuntime) httpResult(cfg map[string]string, u *TgUser, extraCtx map
 	// 响应路径变量(如 {data.xxx})因无 resp 取空;内置变量与 {input}/{payee} 等 extraCtx 照常可用。
 	var parsed interface{}
 	if urlTpl := strings.TrimSpace(cfg["url"]); urlTpl != "" {
-		rawURL := strings.TrimSpace(httpRender(urlTpl, ctx, nil))
+		rawURL := strings.TrimSpace(httpRenderURL(urlTpl, ctx, nil))
 		if !validTgURL(rawURL) {
 			config.LogWarning("http fetch: 非法 URL %q", urlTpl)
 			return fail
@@ -185,7 +186,7 @@ func httpFetch(rawURL, method, headers, body string) (interface{}, bool) {
 // 失败返回 ("",false),由调用方回退静态文本。url/body/text 均经 httpRender 支持 {uid}{first_name} 等变量。
 func bannerAPIText(cfg map[string]string, u *TgUser) (string, bool) {
 	ctx := httpCtx(u, parseArgs(cfg["api_args"]))
-	rawURL := strings.TrimSpace(httpRender(cfg["api_url"], ctx, nil))
+	rawURL := strings.TrimSpace(httpRenderURL(cfg["api_url"], ctx, nil))
 	if rawURL == "" || !validTgURL(rawURL) {
 		config.LogWarning("banner http: 非法或缺失接口地址 %q", cfg["api_url"])
 		return "", false
@@ -246,6 +247,26 @@ func httpRender(tpl string, ctx map[string]string, resp interface{}) string {
 		}
 		if s, ok := jsonPath(resp, key); ok {
 			return s
+		}
+		return ""
+	})
+}
+
+// httpRenderURL 渲染「接口地址」模板:与 httpRender 同,但把每个替换进去的变量值做 URL 编码。
+// 用于避免 {first_name}/{username} 等自由文本含空格/中文/&/# 时把整条 URL 撑坏——
+// 否则 http.NewRequest 的 url.Parse 会报错、请求根本发不出去(表现为“暂时取不到数据”)。
+// 纯 ASCII 常规值(如 uid、数字)编码后不变,零回归;仅对替换值编码,模板里的 ?&= 等结构字符不受影响。
+func httpRenderURL(tpl string, ctx map[string]string, resp interface{}) string {
+	if tpl == "" {
+		return ""
+	}
+	return httpTokenRe.ReplaceAllStringFunc(tpl, func(m string) string {
+		key := strings.TrimSpace(m[1 : len(m)-1])
+		if v, ok := ctx[key]; ok {
+			return url.QueryEscape(v)
+		}
+		if s, ok := jsonPath(resp, key); ok {
+			return url.QueryEscape(s)
 		}
 		return ""
 	})
