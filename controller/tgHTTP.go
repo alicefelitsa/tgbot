@@ -12,11 +12,15 @@ package controller
 //   body      POST 请求体模板(可选)
 //   args      额外模板变量,"k=v,k2=v2"(可选,并入上下文)
 //   text      显示文案模板,可对响应 JSON 取路径如 {data.balance}(可选)
+//
+// 内置模板变量(无需接口返回即可用):{uid}{chat}{lang}{bind}{username}{first_name}
+// 及北京时间 {time}(2006-01-02 15:04:05)/{date}(2006-01-02)/{clock}(15:04:05)。
 //   input_prompt 提示语(可选):配了则点击不立即调接口,先让用户输一条文本,
 //              输入作为模板变量(名由 input_key 定,默认 input)参与后续 url/body/text 渲染
 //   input_key 用户输入绑定的变量名(可选,默认 input)
-//   image_path 图片来源,两种写法自适应:①以 http(s) 开头 → 视为图片直链(可含 {uid} 等变量,如 https://x.com/{uid}.jpg);
-//              ②否则视为响应 JSON 路径(如 data.pic)取直链。取到合法 URL 则内嵌图片发送(可选)
+//   image_path 图片来源,三种写法自适应:① file:<id> 图片库引用(图库按钮回填);
+//              ②以 http(s) 开头 → 图片直链(可含 {uid} 等变量,如 https://x.com/{uid}.jpg);
+//              ③否则视为响应 JSON 路径(如 data.pic)取直链。取到合法图则内嵌图片发送(可选)
 //   list_path 指向响应里数组的路径,如 data.items;配了则每项渲染成一个按钮(可选)
 //   btn_text  按钮文字模板,以当前数组元素为根,如 {title}
 //   btn_url   按钮外链模板(优先),如 {link}
@@ -56,49 +60,28 @@ func (r *TgBotRuntime) httpResult(cfg map[string]string, u *TgUser, extraCtx map
 		ctx[k] = v
 	}
 
-	rawURL := strings.TrimSpace(httpRender(cfg["url"], ctx, nil))
-	if rawURL == "" || !validTgURL(rawURL) {
-		config.LogWarning("http fetch: 非法或缺失 URL %q", cfg["url"])
-		return fail
-	}
-
-	method := strings.ToUpper(strings.TrimSpace(cfg["method"]))
-	if method == "" {
-		method = http.MethodGet
-	}
-	var body io.Reader
-	if method == http.MethodPost {
-		body = strings.NewReader(httpRender(cfg["body"], ctx, nil))
-	}
-
-	reqCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, method, rawURL, body)
-	if err != nil {
-		config.LogError("http fetch 建请求 %s: %v", rawURL, err)
-		return fail
-	}
-	applyHTTPHeaders(req, cfg["headers"])
-
-	resp, err := tgHTTPClient.Do(req)
-	if err != nil {
-		config.LogError("http fetch 请求 %s: %v", rawURL, err)
-		return fail
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		config.LogWarning("http fetch %s 非 2xx: %d", rawURL, resp.StatusCode)
-		return fail
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // 响应体上限 512KB
-	if err != nil {
-		config.LogError("http fetch 读体 %s: %v", rawURL, err)
-		return fail
-	}
+	// 没配接口地址:不发请求,直接把模板(显示文案/配图)渲染回给用户。
+	// 响应路径变量(如 {data.xxx})因无 resp 取空;内置变量与 {input}/{payee} 等 extraCtx 照常可用。
 	var parsed interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		config.LogWarning("http fetch %s 返回非 JSON: %v", rawURL, err)
-		return fail
+	if urlTpl := strings.TrimSpace(cfg["url"]); urlTpl != "" {
+		rawURL := strings.TrimSpace(httpRender(urlTpl, ctx, nil))
+		if !validTgURL(rawURL) {
+			config.LogWarning("http fetch: 非法 URL %q", urlTpl)
+			return fail
+		}
+		method := strings.ToUpper(strings.TrimSpace(cfg["method"]))
+		if method == "" {
+			method = http.MethodGet
+		}
+		body := ""
+		if method == http.MethodPost {
+			body = httpRender(cfg["body"], ctx, nil)
+		}
+		var ok bool
+		parsed, ok = httpFetch(rawURL, method, cfg["headers"], body)
+		if !ok {
+			return fail
+		}
 	}
 
 	res := &TgResult{}
@@ -108,10 +91,14 @@ func (r *TgBotRuntime) httpResult(cfg map[string]string, u *TgUser, extraCtx map
 		res.Text = "🌐 数据已更新"
 	}
 
-	// 配图两种写法自适应:以 http(s) 开头 → 直接当图片地址(先渲染模板,支持 {uid} 等变量占位);
-	// 否则按 JSON 路径从响应里取直链。合法才设为配图(safeImage 还会再校验,拉不到会退化纯文本)
+	// 配图三种写法自适应:① file: 前缀 → 图片库引用,直接当 FileID 用(发送端 photoFile 识别);
+	// ② http(s) 开头 → 图片直链(先过 httpRender,支持 {uid} 等变量占位);
+	// ③ 其余 → 按响应 JSON 路径取直链(如 data.pic、list[0].url)。合法才设为配图,
+	// 取不到自动退化纯文案(发送端 safeImage 还会再校验)
 	if ip := strings.TrimSpace(cfg["image_path"]); ip != "" {
-		if strings.HasPrefix(ip, "http://") || strings.HasPrefix(ip, "https://") {
+		if strings.HasPrefix(ip, "file:") {
+			res.Image = ip
+		} else if strings.HasPrefix(ip, "http://") || strings.HasPrefix(ip, "https://") {
 			if u := strings.TrimSpace(httpRender(ip, ctx, parsed)); validTgURL(u) {
 				res.Image = u
 			}
@@ -156,12 +143,85 @@ func (r *TgBotRuntime) httpResult(cfg map[string]string, u *TgUser, extraCtx map
 	return res
 }
 
-// httpCtx 构造模板上下文:先放管理员自填 args,再用内置用户变量覆盖(内置优先且可预期)。
+// httpFetch 执行一次对外请求并把响应解析为 JSON。入参为已渲染好的最终值。
+// 任何环节失败返回 (nil,false),由调用方决定回退策略。httpResult 与根横幅取数共用它。
+func httpFetch(rawURL, method, headers, body string) (interface{}, bool) {
+	var br io.Reader
+	if method == http.MethodPost {
+		br = strings.NewReader(body)
+	}
+	reqCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, method, rawURL, br)
+	if err != nil {
+		config.LogError("http fetch 建请求 %s: %v", rawURL, err)
+		return nil, false
+	}
+	applyHTTPHeaders(req, headers)
+	resp, err := tgHTTPClient.Do(req)
+	if err != nil {
+		config.LogError("http fetch 请求 %s: %v", rawURL, err)
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		config.LogWarning("http fetch %s 非 2xx: %d", rawURL, resp.StatusCode)
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // 响应体上限 512KB
+	if err != nil {
+		config.LogError("http fetch 读体 %s: %v", rawURL, err)
+		return nil, false
+	}
+	var parsed interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		config.LogWarning("http fetch %s 返回非 JSON: %v", rawURL, err)
+		return nil, false
+	}
+	return parsed, true
+}
+
+// bannerAPIText 用根横幅的 api_* 配置调接口并渲染出引导语文本(只取文本,不涉 list_path 按钮/图)。
+// 失败返回 ("",false),由调用方回退静态文本。url/body/text 均经 httpRender 支持 {uid}{first_name} 等变量。
+func bannerAPIText(cfg map[string]string, u *TgUser) (string, bool) {
+	ctx := httpCtx(u, parseArgs(cfg["api_args"]))
+	rawURL := strings.TrimSpace(httpRender(cfg["api_url"], ctx, nil))
+	if rawURL == "" || !validTgURL(rawURL) {
+		config.LogWarning("banner http: 非法或缺失接口地址 %q", cfg["api_url"])
+		return "", false
+	}
+	method := strings.ToUpper(strings.TrimSpace(cfg["api_method"]))
+	if method == "" {
+		method = http.MethodGet
+	}
+	body := ""
+	if method == http.MethodPost {
+		body = httpRender(cfg["api_body"], ctx, nil)
+	}
+	parsed, ok := httpFetch(rawURL, method, cfg["api_headers"], body)
+	if !ok {
+		return "", false
+	}
+	text := strings.TrimSpace(httpRender(cfg["api_text"], ctx, parsed))
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// httpCtx 构造模板上下文:先放管理员自填 args,再注入内置时间变量,最后用内置用户变量覆盖(内置优先且可预期)。
 func httpCtx(u *TgUser, args map[string]string) map[string]string {
 	ctx := map[string]string{}
 	for k, v := range args {
 		ctx[k] = v
 	}
+	// 内置北京时间变量:用固定 UTC+8 时区,不依赖服务器本地时区、也不依赖接口返回。
+	// 若接口自身返回了时间字段,用路径写法 {data.time} 取(不会被这里的 {time} 遮挡)。
+	bj := time.FixedZone("CST", 8*3600)
+	now := time.Now().In(bj)
+	ctx["time"] = now.Format("2006-01-02 15:04:05")
+	ctx["date"] = now.Format("2006-01-02")
+	ctx["clock"] = now.Format("15:04:05")
 	if u != nil {
 		ctx["uid"] = strconv.FormatInt(u.TgUserID, 10)
 		ctx["chat"] = strconv.FormatInt(u.ChatID, 10)

@@ -64,7 +64,7 @@
           <template v-slot="{row}">{{ configSummary(row) }}</template>
         </el-table-column>
         <el-table-column label="每行" width="60px" align="center">
-          <template v-slot="{row}">{{ isFolder(row) ? row.cols : '—' }}</template>
+          <template v-slot="{row}">{{ isFolder(row) ? row.cols : (Number(row.cols) === 1 ? '整行' : '—') }}</template>
         </el-table-column>
         <el-table-column prop="sort" label="排序" width="70px" align="center"></el-table-column>
         <el-table-column prop="status" label="状态" width="80px" align="center">
@@ -107,9 +107,12 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12" v-if="form.action_type === 'http'">
-            <el-form-item label="输入提示语">
-              <el-input v-model="cfg.input_prompt" placeholder="选填，如：请输入你的订单号"></el-input>
+          <el-col :span="12" v-if="form.action_type === 'http' || form.action_type === 'pick_user'">
+            <el-form-item label="请求方法">
+              <el-select v-model="cfg.method" style="width:100%;">
+                <el-option label="GET" value="GET"></el-option>
+                <el-option label="POST" value="POST"></el-option>
+              </el-select>
             </el-form-item>
           </el-col>
         </el-row>
@@ -169,22 +172,10 @@
           <div class="form-tip" style="margin:0 0 14px 90px;">点「取消」按钮会删除当前这条菜单消息（会话里直接消失），无需额外配置。</div>
         </template>
 
-        <template v-if="form.action_type === 'http'">
-          <el-row :gutter="16">
-            <el-col :span="12">
-              <el-form-item label="请求方法">
-                <el-select v-model="cfg.method" style="width:100%;">
-                  <el-option label="GET" value="GET"></el-option>
-                  <el-option label="POST" value="POST"></el-option>
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="参数">
-                <el-input v-model="cfg.args" placeholder="选填，如 type=vip,limit=5"></el-input>
-              </el-form-item>
-            </el-col>
-          </el-row>
+        <template v-if="form.action_type === 'http' || form.action_type === 'pick_user'">
+          <el-form-item v-if="form.action_type === 'http'" label="输入提示语">
+            <el-input type="textarea" :rows="2" v-model="cfg.input_prompt" placeholder="选填，如：请输入你的订单号"></el-input>
+          </el-form-item>
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="接口地址">
@@ -214,11 +205,35 @@
             </div>
             <el-input ref="richHttp" type="textarea" :rows="4" v-model="cfg.text" placeholder="如：你的余额 {data.balance} 元"></el-input>
           </el-form-item>
-          <el-form-item label="配图路径">
-            <el-input v-model="cfg.image_path" placeholder="选填，直接填图片地址 https://... 或接口返回字段路径 如 data.pic"></el-input>
+          <!--配图路径与按钮列数并排一行(列数对 http 无排版语义,仅避免半行空缺)-->
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="配图路径">
+                <!--三种写法自适应:图库选图回填 file:<id>/直链(可含 {uid} 等占位)/响应字段路径如 {pci}-->
+                <el-input v-model="cfg.image_path" placeholder="图片地址 / {字段路径} / 点「图片库」选图">
+                  <el-button slot="append" icon="el-icon-picture-outline" style="padding:8px 12px;" @click="openPicker('http')" title="从图片库选择"/>
+                </el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="按钮列数">
+                <el-input-number v-model="form.cols" :min="1" :max="6" style="width:100%;"></el-input-number>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+
+        <!--选择用户:固定默认选人页 + 选完把「输入提示语」(feedback_text)当提示让用户输入(如金额),输入作 {input} 随 {payee} 调接口;接口配置复用下方 http 那套-->
+        <template v-if="form.action_type === 'pick_user'">
+          <el-form-item label="输入提示语">
+            <el-input type="textarea" :rows="2" v-model="cfg.feedback_text" placeholder="选完用户后回给用户的一条提示，同时也是让用户输入的引导（如：你已选择 @xxx，请输入金额）。支持 {payee}/{payee_name}/{payee_username}；用户随后输入的文本作为 {input} 变量带进接口"></el-input>
           </el-form-item>
         </template>
 
+        <!--非文件夹也可配列数:设为 1 表示本按钮在父页里独占一行(其余按钮自动断行);http 已并入上行、pick_user 无内联按钮不在此列-->
+        <el-form-item v-if="form.action_type !== 'menu' && form.action_type !== 'http' && form.action_type !== 'pick_user'" label="按钮列数">
+          <el-input-number v-model="form.cols" :min="1" :max="6" style="width:100%;"></el-input-number>
+        </el-form-item>
         <el-form-item v-if="form.action_type === 'menu'" label="每行按钮数">
           <el-input-number v-model="form.cols" :min="1" :max="6" style="width:100%;"></el-input-number>
           <div class="form-tip">这个文件夹展开后，子按钮每行排几个。</div>
@@ -267,16 +282,18 @@ export default {
       where: {title: '', action_type: ''},
       dialogVisible: false,
       previewVisible: false,   // 富文本预览弹窗(点工具栏「预览」才弹出)
+      pickerTarget: 'image',   // 图库选图回填目标:'image'(配图字段)或 'http'(接口配图路径)
       multipleSelection: [],
       actionTypeOptions: [
         {value: 'menu', label: '菜单导航（menu）'},
         {value: 'text', label: '显示文字（text）'},
         {value: 'url', label: '打开链接（url）'},
         {value: 'http', label: '接口取数（http）'},
+        {value: 'pick_user', label: '选择用户（pick_user）'},
         {value: 'cancel', label: '取消（cancel）'},
       ],
       form: this.emptyForm(),
-      cfg: {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', args: '', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: ''},
+      cfg: {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: '', feedback_text: ''},
     }
   },
   computed: {
@@ -408,11 +425,11 @@ export default {
       return p ? p.title : ('(已删除 #' + pid + ')')
     },
     actionTagType(t) {
-      return {menu: '', text: 'success', url: '', handler: 'danger', http: '', back: 'info', cancel: 'danger'}[t] || 'info'
+      return {menu: '', text: 'success', url: '', handler: 'danger', http: '', back: 'info', cancel: 'danger', pick_user: 'warning'}[t] || 'info'
     },
     // 动作类型的中文标签
     actionLabel(t) {
-      return {menu: '菜单导航', text: '显示文字', url: '打开链接', handler: '动态数据', http: '接口取数', back: '返回', cancel: '取消'}[t] || t
+      return {menu: '菜单导航', text: '显示文字', url: '打开链接', handler: '动态数据', http: '接口取数', back: '返回', cancel: '取消', pick_user: '选择用户'}[t] || t
     },
     // 解析某行的 action_config(容错)
     parseCfg(row) {
@@ -456,6 +473,13 @@ export default {
           const tail = cfg.list_path ? ('列表 @' + cfg.list_path) : (cfg.text || '文案')
           return '🌐 调接口：' + m + ' ' + (cfg.url || '—') + ' → ' + tail
         }
+        case 'pick_user': {
+          const m = (cfg.method || 'GET').toUpperCase()
+          let s = '👥 选用户'
+          if (cfg.feedback_text) s += '｜提示：' + cfg.feedback_text
+          if (cfg.url) s += '｜调接口：' + m + ' ' + cfg.url
+          return s
+        }
         default:
           return '—'
       }
@@ -487,7 +511,7 @@ export default {
     add(parentId) {
       this.form = this.emptyForm()
       this.form.parent_id = Number(parentId) || 0
-      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', args: '', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: ''}
+      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: '', feedback_text: ''}
       this.dialogVisible = true
     },
     edit(row) {
@@ -495,7 +519,7 @@ export default {
         id: row.id, parent_id: Number(row.parent_id), lang: row.lang, title: row.title,
         action_type: row.action_type, cols: row.cols, sort: row.sort, status: row.status,
       }
-      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', args: '', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: ''}
+      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: '', feedback_text: ''}
       let parsed = {}
       try {
         parsed = row.action_config ? JSON.parse(row.action_config) : {}
@@ -503,7 +527,6 @@ export default {
       this.cfg.page = parsed.page || ''
       this.cfg.text = parsed.text || ''
       this.cfg.url = parsed.url || ''
-      this.cfg.args = parsed.args || ''
       this.cfg.method = parsed.method || 'GET'
       this.cfg.headers = parsed.headers || ''
       this.cfg.body = parsed.body || ''
@@ -515,10 +538,11 @@ export default {
       this.cfg.target = parsed.target || 'parent'
       this.cfg.image = parsed.image || ''
       this.cfg.format = parsed.format || 'html'
+      this.cfg.feedback_text = parsed.feedback_text || ''
       this.dialogVisible = true
     },
     onActionTypeChange() {
-      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', args: '', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: ''}
+      this.cfg = {page: '', target: 'parent', text: '', url: '', image: '', image_path: '', format: 'html', method: 'GET', headers: '', body: '', list_path: '', btn_text: '', btn_url: '', input_prompt: '', feedback_text: ''}
     },
     // ==================== 富文本工具栏(仅包 Telegram 支持的标签,输出仍是 HTML 字符串) ====================
     // 取 el-input 内部真实 textarea/input DOM(才能拿到光标选区)
@@ -527,12 +551,15 @@ export default {
       if (!comp || !comp.$el) return null
       return comp.$el.querySelector('textarea') || comp.$el.querySelector('input')
     },
-    // 从图片库选图:回填 file:<file_id> 到 cfg.image,发送端会直接用 tg.FileID 秒发
-    openPicker() {
+    // 从图片库选图:回填 file:<file_id>,发送端会直接用 tg.FileID 秒发
+    // http 模式选图回填到 image_path(后端遇 file: 前缀直接当 FileID),其余回填 cfg.image
+    openPicker(target) {
+      this.pickerTarget = target || 'image'
       this.$refs.picker.show()
     },
     onPickImage(val) {
-      this.cfg.image = val
+      if (this.pickerTarget === 'http') { this.cfg.image_path = val }
+      else { this.cfg.image = val }
     },
     // 在选区两侧包一对标签(如 <b>...</b>);无选区则插入占位文字
     insertTag(refName, open, close) {
@@ -586,9 +613,17 @@ export default {
       if (t === 'cancel') return JSON.stringify({})
       if (t === 'text') return JSON.stringify({text: this.cfg.text, image: this.cfg.image, format: this.cfg.format})
       if (t === 'url') return JSON.stringify({url: this.cfg.url})
+      if (t === 'pick_user') return JSON.stringify({
+        feedback_text: this.cfg.feedback_text,
+        method: this.cfg.method || 'GET', url: this.cfg.url, headers: this.cfg.headers,
+        body: this.cfg.body, text: this.cfg.text,
+        image_path: this.cfg.image_path,
+        list_path: this.cfg.list_path, btn_text: this.cfg.btn_text, btn_url: this.cfg.btn_url,
+        cols: String(this.form.cols || 1), format: this.cfg.format || '',
+      })
       if (t === 'http') return JSON.stringify({
         method: this.cfg.method || 'GET', url: this.cfg.url, headers: this.cfg.headers,
-        body: this.cfg.body, args: this.cfg.args, text: this.cfg.text,
+        body: this.cfg.body, text: this.cfg.text,
         image_path: this.cfg.image_path,
         input_prompt: this.cfg.input_prompt,
         list_path: this.cfg.list_path, btn_text: this.cfg.btn_text, btn_url: this.cfg.btn_url,
@@ -603,8 +638,8 @@ export default {
       if (this.form.action_type === 'url' && !this.cfg.url) {
         this.$message.warning("请填写链接地址"); return
       }
-      if (this.form.action_type === 'http' && !this.cfg.url) {
-        this.$message.warning("请填写接口地址"); return
+      if (this.form.action_type === 'http' && !this.cfg.url && !this.cfg.text) {
+        this.$message.warning("接口地址与显示文案至少填一个（只填文案则直接返回模板、不发请求）"); return
       }
       // 逻辑校验(仅对已存在菜单):①空文件夹点开是空页 ②把有子项的文件夹改成非文件夹会隐藏子项
       if (this.form.id) {

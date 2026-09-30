@@ -20,9 +20,10 @@ import (
 
 // TgButton 内联键盘按钮:Cb 走站内回调,Url 走外链,二者取一
 type TgButton struct {
-	Text string // 按钮文字
-	Cb   string // callback_data(站内跳转,只放 域:ID)
-	Url  string // 或外链
+	Text    string // 按钮文字
+	Cb      string // callback_data(站内跳转,只放 域:ID)
+	Url     string // 或外链
+	FullRow bool   // 独占一行:排版时先断行、该按钮单独成行(子项 cols=1 即整行)
 }
 
 // TgResult 一次动作的执行结果:要渲染的文案 + 可选配图 + 按钮 + 排版列数
@@ -75,6 +76,12 @@ func buildKeyboard(buttons []TgButton, cols int) *tg.InlineKeyboardMarkup {
 	}
 	rows := make([][]tg.InlineKeyboardButton, 0, len(buttons)/cols+1)
 	var cur []tg.InlineKeyboardButton
+	flush := func() {
+		if len(cur) > 0 {
+			rows = append(rows, cur)
+			cur = nil
+		}
+	}
 	for _, b := range buttons {
 		var btn tg.InlineKeyboardButton
 		if b.Url != "" {
@@ -86,6 +93,11 @@ func buildKeyboard(buttons []TgButton, cols int) *tg.InlineKeyboardMarkup {
 			btn = tg.NewInlineKeyboardButtonURL(b.Text, b.Url)
 		} else {
 			btn = tg.NewInlineKeyboardButtonData(b.Text, b.Cb)
+		}
+		if b.FullRow { // 整行按钮:先收尾当前行,让自己独占一行
+			flush()
+			rows = append(rows, []tg.InlineKeyboardButton{btn})
+			continue
 		}
 		cur = append(cur, btn)
 		if len(cur) == cols {

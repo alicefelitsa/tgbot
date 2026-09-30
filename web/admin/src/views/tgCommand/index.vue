@@ -88,13 +88,32 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <div class="form-tip" style="margin:0 0 14px 90px;">{{ actionHint }}</div>
 
         <!--按动作类型动态显示配置项-->
         <template v-if="form.action_type === 'menu'">
           <!--仅「根主菜单」横幅配在命令上;选具体一级菜单则去该菜单行本身配-->
           <template v-if="cfg.page === 'root'">
-            <el-form-item label="菜单引导语">
+            <el-row :gutter="16">
+              <el-col :span="cfg.text_source === 'http' ? 12 : 24">
+                <el-form-item label="引导语来源">
+                  <el-select v-model="cfg.text_source" style="width:100%;">
+                    <el-option label="✍️ 静态文本" value="static"></el-option>
+                    <el-option label="🌐 接口取数（调外部接口动态生成引导语）" value="http"></el-option>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12" v-if="cfg.text_source === 'http'">
+                <el-form-item label="请求方法">
+                  <el-select v-model="cfg.api_method" style="width:100%;">
+                    <el-option label="GET" value="GET"></el-option>
+                    <el-option label="POST" value="POST"></el-option>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <!-- 静态文本引导语（默认） -->
+            <el-form-item v-if="cfg.text_source !== 'http'" label="菜单引导语">
               <div class="rich-bar">
                 <span class="rb" @click="insertTag('richCmd','<b>','</b>')"><b>B</b></span>
                 <span class="rb" @click="insertTag('richCmd','<i>','</i>')"><i>I</i></span>
@@ -104,15 +123,59 @@
                 <span class="rb" @click="insertTag('richCmd','<span class=&quot;spoiler&quot;>','</span>')">剧透</span>
                 <span class="rb" @click="insertLink('richCmd')">🔗链接</span>
                 <span class="rb" @click="insertBreak('richCmd')">⏎分段</span>
-                <span class="rb rb-preview" @click="previewVisible=true">👁 预览</span>
+                <span class="rb rb-preview" @click="openPreview('text')">👁 预览</span>
               </div>
               <el-input ref="richCmd" type="textarea" :rows="4" v-model="cfg.text" placeholder="显示在九宫格按钮上方（默认「请选择：」）"></el-input>
             </el-form-item>
-            <el-form-item label="配图">
-              <el-input v-model="cfg.image" placeholder="选填：图片库引用 file:xxx 或根主菜单顶部横幅图直链 https://...">
-                <el-button slot="append" icon="el-icon-picture-outline" @click="openPicker">图片库</el-button>
-              </el-input>
-            </el-form-item>
+
+            <!-- 接口取数引导语：复用统一模板，只保留单个「引导语模板」框（不再单列兜底） -->
+            <template v-else>
+              <el-row :gutter="16">
+                <el-col :span="12">
+                  <el-form-item label="接口地址">
+                    <el-input type="textarea" :rows="2" v-model="cfg.api_url" placeholder="http/https 开头，可含 {uid} {chat} {first_name} {username} 等变量"></el-input>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="请求头">
+                    <el-input type="textarea" :rows="2" v-model="cfg.api_headers" placeholder="选填，每行一条 Key: Value"></el-input>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item v-if="cfg.api_method === 'POST'" label="请求体">
+                <el-input type="textarea" :rows="2" v-model="cfg.api_body" placeholder="选填，POST 报文，可含 {uid} 等变量"></el-input>
+              </el-form-item>
+              <el-form-item label="引导语模板">
+                <div class="rich-bar">
+                  <span class="rb" @click="insertTag('richTpl','<b>','</b>','api_text')"><b>B</b></span>
+                  <span class="rb" @click="insertTag('richTpl','<i>','</i>','api_text')"><i>I</i></span>
+                  <span class="rb" @click="insertTag('richTpl','<u>','</u>','api_text')"><u>U</u></span>
+                  <span class="rb" @click="insertTag('richTpl','<s>','</s>','api_text')"><s>S</s></span>
+                  <span class="rb" @click="insertTag('richTpl','<code>','</code>','api_text')">代码</span>
+                  <span class="rb" @click="insertTag('richTpl','<span class=&quot;spoiler&quot;>','</span>','api_text')">剧透</span>
+                  <span class="rb" @click="insertLink('richTpl','api_text')">🔗链接</span>
+                  <span class="rb" @click="insertBreak('richTpl','api_text')">⏎分段</span>
+                  <span class="rb rb-preview" @click="openPreview('api_text')">👁 预览</span>
+                </div>
+                <el-input ref="richTpl" type="textarea" :rows="4" v-model="cfg.api_text" placeholder="从接口响应取值渲染，如：🕐 {time}　今日公告：{data.notice}（支持 {data.xxx} 路径与 {uid}/{first_name}/{time} 等内置变量）"></el-input>
+              </el-form-item>
+            </template>
+
+            <!--配图与每行按钮数并排一行-->
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="配图">
+                  <el-input v-model="cfg.image" placeholder="选填：图片库引用 file:xxx 或横幅图直链 https://...">
+                    <el-button slot="append" icon="el-icon-picture-outline" @click="openPicker">图片库</el-button>
+                  </el-input>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="每行按钮数">
+                  <el-input-number v-model="cfg.root_cols" :min="1" :max="6" style="width:100%;"></el-input-number>
+                </el-form-item>
+              </el-col>
+            </el-row>
           </template>
           <div v-else class="form-tip" style="margin:0 0 14px 90px;">将打开所选一级菜单页；该页的引导语与配图请到「机器人菜单」里配置该菜单项本身。</div>
         </template>
@@ -128,7 +191,7 @@
               <span class="rb" @click="insertTag('richText','<span class=&quot;spoiler&quot;>','</span>')">剧透</span>
               <span class="rb" @click="insertLink('richText')">🔗链接</span>
               <span class="rb" @click="insertBreak('richText')">⏎分段</span>
-              <span class="rb rb-preview" @click="previewVisible=true">👁 预览</span>
+              <span class="rb rb-preview" @click="openPreview('text')">👁 预览</span>
             </div>
             <el-input ref="richText" type="textarea" :rows="4" v-model="cfg.text" placeholder="发送的固定文案"></el-input>
           </el-form-item>
@@ -164,7 +227,7 @@
       </span>
     </el-dialog>
     <el-dialog title="富文本预览" :visible.sync="previewVisible" width="760px" append-to-body>
-      <div v-if="cfg.text" class="rich-preview" v-html="cfg.text"></div>
+      <div v-if="cfg[previewField]" class="rich-preview" v-html="cfg[previewField]"></div>
       <div v-else class="form-tip">（暂无内容，请先在文案框输入内容）</div>
       <span slot="footer"><el-button size="small" @click="previewVisible=false">关 闭</el-button></span>
     </el-dialog>
@@ -190,6 +253,7 @@ export default {
       where: {command: ''},
       dialogVisible: false,
       previewVisible: false,   // 富文本预览弹窗(点工具栏「预览」才弹出)
+      previewField: 'text',    // 预览弹窗当前渲染的 cfg 字段(text=普通文案 / api_text=接口引导语模板)
       multipleSelection: [],
       actionTypeOptions: [
         {value: 'menu', label: '打开菜单（menu）'},
@@ -197,19 +261,9 @@ export default {
         {value: 'url', label: '打开链接（url）'},
       ],
       form: this.emptyForm(),
-      cfg: {page: 'root', text: '', url: '', image: '', format: 'html', args: ''},
+      cfg: {page: 'root', text: '', url: '', image: '', format: 'html', args: '', text_source: 'static', api_method: 'GET', api_url: '', api_headers: '', api_body: '', api_text: '', root_cols: ''},
       topMenus: [],   // 一级菜单文件夹(parent_id=0 且 action_type=menu),供「跳转目标」下拉
     }
-  },
-  computed: {
-    // 当前选中动作类型的用途说明(随下拉选择实时变化)
-    actionHint() {
-      return {
-        menu: '命令触发后打开主菜单（九宫格）——一般给 /start 用。',
-        text: '命令触发后回显一段固定文字——内容写死在下面（如 /help、/support）。',
-        url: '命令触发后回一条带外链按钮的消息——点击打开网页 / 频道 / 店铺等。',
-      }[this.form.action_type] || ''
-    },
   },
   mounted() {
     this.getList()
@@ -297,7 +351,7 @@ export default {
     },
     add() {
       this.form = this.emptyForm()
-      this.cfg = {page: 'root', text: '', url: '', image: '', format: 'html', args: ''}
+      this.cfg = {page: 'root', text: '', url: '', image: '', format: 'html', args: '', text_source: 'static', api_method: 'GET', api_url: '', api_headers: '', api_body: '', api_text: '', root_cols: ''}
       this.dialogVisible = true
     },
     edit(row) {
@@ -305,7 +359,7 @@ export default {
         id: row.id, command: row.command, description: row.description,
         action_type: row.action_type, sort: row.sort, status: row.status,
       }
-      this.cfg = {page: '', text: '', url: '', image: '', format: 'html', args: ''}
+      this.cfg = {page: '', text: '', url: '', image: '', format: 'html', args: '', text_source: 'static', api_method: 'GET', api_url: '', api_headers: '', api_body: '', api_text: '', root_cols: ''}
       let parsed = {}
       try {
         parsed = row.action_config ? JSON.parse(row.action_config) : {}
@@ -316,10 +370,17 @@ export default {
       this.cfg.args = parsed.args || ''
       this.cfg.image = parsed.image || ''
       this.cfg.format = parsed.format || 'html'
+      this.cfg.text_source = parsed.text_source || 'static'
+      this.cfg.api_method = parsed.api_method || 'GET'
+      this.cfg.api_url = parsed.api_url || ''
+      this.cfg.api_headers = parsed.api_headers || ''
+      this.cfg.api_body = parsed.api_body || ''
+      this.cfg.api_text = parsed.api_text || ''
+      this.cfg.root_cols = parsed.cols ? Number(parsed.cols) : ''
       this.dialogVisible = true
     },
     onActionTypeChange() {
-      this.cfg = {page: this.form.action_type === 'menu' ? 'root' : '', text: '', url: '', image: '', format: 'html', args: ''}
+      this.cfg = {page: this.form.action_type === 'menu' ? 'root' : '', text: '', url: '', image: '', format: 'html', args: '', text_source: 'static', api_method: 'GET', api_url: '', api_headers: '', api_body: '', api_text: '', root_cols: ''}
     },
     // ==================== 富文本工具栏(仅包 Telegram 支持的标签,输出仍是 HTML 字符串) ====================
     _richEl(refName) {
@@ -327,26 +388,26 @@ export default {
       if (!comp || !comp.$el) return null
       return comp.$el.querySelector('textarea') || comp.$el.querySelector('input')
     },
-    insertTag(refName, open, close) {
+    insertTag(refName, open, close, field = 'text') {
       const el = this._richEl(refName)
       if (!el) return
       const start = el.selectionStart || 0
       const end = el.selectionEnd || 0
-      const val = this.cfg.text || ''
+      const val = this.cfg[field] || ''
       const sel = val.slice(start, end) || '文字'
-      this.cfg.text = val.slice(0, start) + open + sel + close + val.slice(end)
+      this.cfg[field] = val.slice(0, start) + open + sel + close + val.slice(end)
       this.$nextTick(() => {
         el.focus()
         const p = start + open.length + sel.length + close.length
         try { el.setSelectionRange(p, p) } catch (e) {}
       })
     },
-    insertLink(refName) {
+    insertLink(refName, field = 'text') {
       const el = this._richEl(refName)
       if (!el) return
       const start = el.selectionStart || 0
       const end = el.selectionEnd || 0
-      const val = this.cfg.text || ''
+      const val = this.cfg[field] || ''
       const sel = val.slice(start, end) || '链接文字'
       this.$prompt('请输入链接地址（http/https 开头）', '插入链接', {
         inputValue: 'https://',
@@ -354,28 +415,44 @@ export default {
         inputErrorMessage: '请输入 http/https 开头的地址',
       }).then(({ value }) => {
         const open = '<a href="' + value + '">'
-        this.cfg.text = val.slice(0, start) + open + sel + '</a>' + val.slice(end)
+        this.cfg[field] = val.slice(0, start) + open + sel + '</a>' + val.slice(end)
       }).catch(() => {})
     },
     // 在光标处插入一个空行(段落分隔):Telegram 不支持行距,只能靠空行把长段落拆成几小段拉开间距
-    insertBreak(refName) {
+    insertBreak(refName, field = 'text') {
       const el = this._richEl(refName)
       if (!el) return
       const end = el.selectionEnd || 0
-      const val = this.cfg.text || ''
-      this.cfg.text = val.slice(0, end) + '\n\n' + val.slice(end)
+      const val = this.cfg[field] || ''
+      this.cfg[field] = val.slice(0, end) + '\n\n' + val.slice(end)
       this.$nextTick(() => {
         el.focus()
         const p = end + 2
         try { el.setSelectionRange(p, p) } catch (e) {}
       })
     },
+    // 弹出富文本预览:field 指定预览哪个 cfg 字段(默认普通文案 text)
+    openPreview(field) {
+      this.previewField = field || 'text'
+      this.previewVisible = true
+    },
     buildActionConfig() {
       const t = this.form.action_type
       if (t === 'menu') {
         // 无论选根主菜单还是一级菜单,都保留 text/image/format(选具体菜单时后端忽略它们),
         // 避免“切到具体菜单→保存→再切回根”时横幅数据被抹掉
-        return JSON.stringify({page: this.cfg.page || 'root', text: this.cfg.text, image: this.cfg.image, format: this.cfg.format})
+        const o = {page: this.cfg.page || 'root', text: this.cfg.text, image: this.cfg.image, format: this.cfg.format}
+        // text_source + api_* 始终写入:切到静态再切回来时接口配置不丢;
+        // 后端只在 text_source==='http' 时才读 api_*,静态下这些字段不参与行为
+        o.text_source = this.cfg.text_source || 'static'
+        o.api_method = this.cfg.api_method || 'GET'
+        o.api_url = this.cfg.api_url
+        o.api_headers = this.cfg.api_headers
+        o.api_body = this.cfg.api_body
+        o.api_text = this.cfg.api_text
+        // 根页每行按钮数:仅显式配了才写(后端缺省 2);parseConfig 要求字符串值
+        if (this.cfg.root_cols) o.cols = String(this.cfg.root_cols)
+        return JSON.stringify(o)
       }
       if (t === 'text') return JSON.stringify({text: this.cfg.text, image: this.cfg.image, format: this.cfg.format})
       if (t === 'url') return JSON.stringify({url: this.cfg.url})
@@ -393,6 +470,9 @@ export default {
       }
       if (this.form.action_type === 'url' && !this.cfg.url) {
         this.$message.warning("请填写链接地址"); return false
+      }
+      if (this.form.action_type === 'menu' && this.cfg.page === 'root' && this.cfg.text_source === 'http' && !this.cfg.api_url) {
+        this.$message.warning("接口取数模式下请填写接口地址"); return false
       }
       return true
     },
