@@ -40,7 +40,7 @@
         <el-table-column label="大小" width="100px" align="center">
           <template v-slot="{row}">{{ fmtSize(row.size) }}</template>
         </el-table-column>
-        <el-table-column label="引用值(file:)" width="420px">
+        <el-table-column label="引用值(file:)" min-width="180px">
           <template v-slot="{row}">
             <el-tooltip effect="light" placement="top">
               <div slot="content" style="max-width:520px;word-break:break-all;line-height:1.6;">file:{{ row.tg_file_id }}</div>

@@ -1326,6 +1326,11 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
 - **做法**:MySQL 无「只改索引注释」语法,只能同一条 ALTER 里 `DROP INDEX x, ADD [UNIQUE] INDEX x (cols) COMMENT '...'` 先删后建。表都很小(最大百余行),重建毫秒级、同语句内完成,安全。临时 Go 程序执行、跑完即删。
 - **验证**:8 条 ALTER 均成功;再查 `information_schema.statistics` 确认 `NAMED_IDX=8 missing=0`。附录 A 建表 SQL 的索引也同步逐条加上 `COMMENT`(用各表独有的结尾 ENGINE 行做上下文,避开 §3 同名示意 DDL)。
 
+### 2026-09-30 · UI · 图片库「引用值(file:)」列改自适应
+- **背景**:用户反馈图片库列表「引用值(file:)」列写死 `width=420px` 太宽。
+- **改动**:`web/admin/src/views/tgImage/index.vue` 该列 `width="420px"` → `min-width="180px"`,使其与「名称」列一样参与剩余空间自适应分配。注:该列单元格已内置 `el-tooltip`(悬停显示完整 file_id),故不加 `show-overflow-tooltip`避免两个 tooltip 冲突。
+- **验证**:`npm run build` DONE + GetProblems 无错;纯前端,浏览器 Ctrl+F5 生效,无需重启后端。
+
 ### 运维备忘
 - **端口占用**:调试残留的 `tgbot.exe` 会占 8200,报 `bind ... Only one usage of each socket address`;`Stop-Process -Name tgbot` 释放。
 - **单实例**:getUpdates 长轮询同一 bot **同时只能跑一个进程**,否则抢更新 + 撞端口;调试固定用 GoLand 的 Run。
