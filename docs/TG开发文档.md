@@ -1389,6 +1389,9 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
   - **调整(同日):类别名由「选择收款人」改为通用的「选择用户」**:用户要求不把场景定死(以后可适应更多用途)。action_type key 仍为 `pick_user` 不变(后端路由/存量数据不受影响),只改显示文案:前端 `tgMenu/index.vue`——`actionTypeOptions` 下拉 label 、`actionLabel` 中文映射、`configSummary` 的 `👥 选用户` 前缀、pick_user 块注释与 placeholder(“选完用户后…请输入金额”);后端 `tgBotRuntime.go` 选人页常量 `pickUserPageText`=“请使用以下方法选择一个用户：”/`pickUserPickBtn`=“🔍 选择用户”、取消回显“已取消，未选择用户”。验证:go build/vet + `npm run build` 均过。**含后端常量改动,需重启后端 + 刷新前端**。
   - **调整(同日):接口地址留空时不发请求、直接返回模板**:用户场景——如「我要发红包」选用户+输金额后无需真接口,只想把「显示文案」模板(如 `红包发送成功：{input}`)直接回给用户。改 `tgHTTP.go` `httpResult`:把“URL 缺失即回 fail”改为——`cfg["url"]` 非空才渲染+校验+`httpFetch`(失败仍回 fail);为空则跳过整个请求环节,`parsed` 保持 nil 继续往下走,用 ctx(含 extraCtx 的 `{input}`/`{payee}` + 内置变量)渲染 `text`/`image_path` 直接返回(响应路径变量 `{data.xxx}` 因无 resp 取空)。连带:`handlePickedChat` 反馈为空的直调分支守卫由 `url!=""` 改为 `url!="" || text!=""`;前端 `save` 对 http 的校验改为“接口地址与显示文案至少填一个”。此行为 http 与 pick_user 共用(都走 httpResult)。验证:go build/vet + `npm run build` 均过。**含后端改动,需重启后端 + 刷新前端**。
   - **调整(同日):接口取数(http)与 pick_user 提示语行为对齐**:用户要求“接口取数那边也一致”。排查发现无-url→模板行为本就共用 `httpResult`(http 已一致);但有一处真不一致:pick_user 的 feedback_text 发送前过 `httpRender`(支持变量),而 http 的 `input_prompt` 在 `menuHTTPResult` 提示语分支里是**原样发送不做变量替换**。改:`menuHTTPResult` 的 prompt 分支返回前过 `httpRender(prompt, httpCtx(u, parseArgs(cfg["args"])), nil)`,使 http 输入提示语也支持 `{uid}/{first_name}/{time}` 等内置变量(pick_user 额外有 `{payee}`)。验证:go build/vet 过,需重启后端。
+  - **调整(同日):菜单树连接线颜色调深**:用户反馈树形连接线太浅。`tgMenu/index.vue` 里 `.tree-guide--vline::before`/`.tree-guide--elbow::before`/`.tree-guide--elbow::after` 三处 `background` 由 `#dcdfe6` 改为次级边框色 `#c0c4cc`(仅深一档、不刺眼)。纯前端,`npm run build` 过,Ctrl+F5 生效,无需重启后端。
+  - **调整(同日):tgMenu 卡片满窗口(无分页页高度偏移例外)**:用户反馈菜单页底部空一截——因 tgMenu 是树形表、无分页,但仍用带分页页的统一偏移 `calc(100vh - 182px)`,底部正好空出分页条位置。带分页页表格下多一个 `.currentPage`(margin-top:10px + 约 40px 高的 el-pagination 条 ≈ 50px),tgMenu 无此块。改:`tgMenu/index.vue` 表格高度由 `calc(100vh - 182px)` 先改 `132px`——但 132 减过头出现垂直滚动条(实际可填充量小于 50px),回调为 `calc(100vh - 150px)`。因 `calc` 定值靠猜像素反复调不精确(对比 tgUser 带分页页才看清差异),**最终改为动态算高**:模板 `:height="tableHeight"`,新增 `setTableHeight()`——`this.$nextTick` 里用 `this.$refs.table.$el.getBoundingClientRect().top` 实量表格顶部到视口顶距离,`tableHeight = Math.max(240, window.innerHeight - top - 24)`(24=el-card body 下内边距10+卡片下外边距10+余量4,与带分页页卡片底到视口底间距对齐);`mounted` 调用并挂 `window resize` 监听,`beforeDestroy` 摘除。**tgMenu 不再用 182px 定值,改自适应,任何窗口高度都铺满且不出页面滚动条**(表格行多时仍保留其内部滚动)。纯前端,`npm run build` 过,Ctrl+F5 生效。
+  - **调整(同日):全局统一——抽出 `tableAutoHeight` mixin 应用到所有列表页**:用户要求“整个后台表格高度都改成运行时动态计算”。新建 `web/admin/src/mixins/tableAutoHeight.js`——`data.tableHeight`(初值400) + `setTableHeight()`(`$nextTick` 里 `getBoundingClientRect().top` 量表格顶部位置,再**累加表格后续同父兄弟元素(分页条)高度+margin**,`tableHeight = Math.max(240, innerHeight - top - below - 24)`),`mounted` 挂 `resize` 监听、`beforeDestroy` 摘除。因同时量 top 与 below(分页条),**带分页(tgUser/tgChat/tgImage)与无分页(tgMenu/tgCommand)均自适应**,不再需为无分页页单独记偏移。接入方式:每页 `mixins: [tableAutoHeight]` + 表格 `ref="table" :height="tableHeight"`(前提:表格 ref 必为 table、且与分页条同为 el-card body 直接子元素)。tgMenu 删内联的动态逻辑改用它。注:sysSetting 无表格不受影响。验证:`npm run build` 过、GetProblems 无错;纯前端,Ctrl+F5 生效。
 
 ### 运维备忘
 - **端口占用**:调试残留的 `tgbot.exe` 会占 8200,报 `bind ... Only one usage of each socket address`;`Stop-Process -Name tgbot` 释放。
@@ -1404,6 +1407,47 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
 2. `tg_handler` 表加一行 `handler_key=my_key, name=中文名`。
 3. 后台「机器人菜单」里新建一条 `action_type=handler`,数据类选 `my_key`,填参数,挂到目标父菜单下。
 4. 纯配置改动无需重启;只有新增了 Go 函数才需重新编译部署。
+
+---
+
+## 附:新增列表页(表格)标准模板——高度自适应“卡片满窗口”
+
+后台所有列表页的 `el-table` 高度统一由 mixin `web/admin/src/mixins/tableAutoHeight.js` **运行时动态计算**(量表格顶部到视口顶距离 + 累加表格后面分页条等兄弟元素高度),精确铺满窗口底部且不出页面级滚动条。**新增一个表格页只需按下面两步接入,不要再写 `calc(100vh - 182px)` 之类定值。**
+
+### 两步接入(必做)
+
+1. 组件里引入并挂上 mixin:
+   ```js
+   import tableAutoHeight from "@/mixins/tableAutoHeight";
+   export default {
+     name: "XxxList",
+     mixins: [tableAutoHeight],   // ← 提供 data.tableHeight + setTableHeight + resize 监听
+     // ...data/computed/methods/mounted 照常写,与 mixin 合并(生命周期两边都跑)
+   }
+   ```
+2. 表格用 `ref="table"` 且高度绑定 `:height="tableHeight"`:
+   ```html
+   <el-card>
+     <!-- 搜索头 / 工具栏(可选) -->
+     <el-table ref="table" class="tableData" :data="tableData" :height="tableHeight" border>
+       <!-- 列... -->
+     </el-table>
+     <!-- 分页(可选):必须与表格同为 el-card body 的直接子元素 -->
+     <div class="currentPage" style="margin-top:10px;text-align:center;">
+       <el-pagination ... />
+     </div>
+   </el-card>
+   ```
+
+### mixin 依赖的两个前提(违反则不生效/算错)
+
+- **表格 `ref` 必须叫 `table`**(mixin 写死取 `this.$refs.table`)。
+- **表格与分页条必须是 `el-card` body 的同级直接子元素**(mixin 靠“累加表格 `nextElementSibling` 链的高度”扣掉分页条;无分页则累加为 0,自动适配)。
+- 结构类间距(`.toolbar` / `.el-card` margin / `.el-card__body` padding)**只走 App.vue 全局规则,单页不得用 scoped 重定义**——历史上页面级 scoped `.toolbar{margin-bottom}` 叠加全局导致过溢出。底部预留常量 `24`(=body 下内边距10 + 卡片下外边距10 + 余量4)已内置,若个别页有 1~2px 缝/滚动条,微调 mixin 里这一个数即可(全局生效)。
+
+### 已接入页面
+
+`tgMenu`(树形无分页)、`tgCommand`(无分页)、`tgUser`、`tgChat`、`tgImage`(后三者带分页)。`sysSetting` 是表单无表格,不涉及。
 
 ---
 

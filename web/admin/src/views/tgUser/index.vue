@@ -28,7 +28,7 @@
       </div>
 
       <!--数据表格-->
-      <el-table ref="table" class="tableData" :data="tableData" height="calc(100vh - 182px)"
+      <el-table ref="table" class="tableData" :data="tableData" :height="tableHeight"
                 :border="true" v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" align="center"></el-table-column>
         <el-table-column prop="id" label="ID" width="70px" align="center"></el-table-column>
@@ -154,10 +154,12 @@
 <script>
 import {getTgUserList, saveTgUser, delTgUser, sendTgUserMessage} from "@/api/tgUser";
 import ImagePicker from "@/components/ImagePicker";
+import tableAutoHeight from "@/mixins/tableAutoHeight";
 
 export default {
   name: "TgUser",
   components: {ImagePicker},
+  mixins: [tableAutoHeight],
   data() {
     return {
       tableData: [],

@@ -30,8 +30,8 @@
         <span style="margin-left:12px;color:#888;font-size:13px;">整棵菜单以树形展示，缩进即上下级关系；点行首箭头展开/折叠。搜索时列出所有匹配项。</span>
       </div>
 
-      <!--数据表格(树形)-->
-      <el-table ref="table" class="tableData" :data="displayData" height="calc(100vh - 182px)"
+      <!--数据表格(树形,无分页):高度由 setTableHeight() 动态算(视口高-表格顶部位置-底部留白),保证铺满窗口又不出页面滚动条-->
+      <el-table ref="table" class="tableData" :data="displayData" :height="tableHeight"
                 :border="true" v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" align="center"></el-table-column>
         <el-table-column prop="id" label="ID" width="80px" align="center"></el-table-column>
@@ -270,10 +270,12 @@
 <script>
 import {getTgMenuList, addTgMenu, saveTgMenu, delTgMenu} from "@/api/tgMenu";
 import ImagePicker from "@/components/ImagePicker";
+import tableAutoHeight from "@/mixins/tableAutoHeight";
 
 export default {
   name: "TgMenu",
   components: {ImagePicker},
+  mixins: [tableAutoHeight],
   data() {
     return {
       allMenus: [],        // 全量菜单(扁平),用于构树 + id→名称映射 + 上级下拉
@@ -742,7 +744,7 @@ export default {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: #dcdfe6;
+  background: #c0c4cc;
 }
 /* 接本子项的折角:竖线从顶到中 + 横线接箭头;若非末个兄弟则竖线续到底(连向下一个兄弟) */
 .tree-guide--elbow::before {
@@ -752,7 +754,7 @@ export default {
   top: 0;
   height: 50%;
   width: 1px;
-  background: #dcdfe6;
+  background: #c0c4cc;
 }
 .tree-guide--elbow.tree-guide--elbow-more::before {
   height: 100%;
@@ -766,7 +768,7 @@ export default {
   margin: auto 0; /* 上下 auto 居中:浏览器吸附到整像素,避免 top:50% 落在半像素被抗锯齿糊成2px */
   width: 26px;
   height: 1px;
-  background: #dcdfe6;
+  background: #c0c4cc;
 }
 .tree-node {
   display: flex;
