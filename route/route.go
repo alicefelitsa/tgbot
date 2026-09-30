@@ -81,6 +81,13 @@ func SetupRouter() *gin.Engine {
 		boss.GET("/GetBotProfile", tgBot.GetBotProfile)
 	}
 
+	// Mock 调试接口:自建两个稳定测试接口(不鉴权),供后台 http/pick_user 菜单填地址联调,免依赖第三方
+	test := router.Group("/api/test")
+	{
+		test.GET("/get", controller.MockGet)    // GET:把收到的查询参数原样回显进 data
+		test.POST("/post", controller.MockPost) // POST:把收到的 JSON body 原样回显进 data
+	}
+
 	// Telegram 回调：公开组，不挂 BossAuth，用 secret token 头校验
 	router.POST(config.Conf.GetString("telegram.webhookPath"), tgBot.Webhook)
 
