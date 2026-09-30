@@ -1331,6 +1331,18 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
 - **改动**:`web/admin/src/views/tgImage/index.vue` 该列 `width="420px"` → `min-width="180px"`,使其与「名称」列一样参与剩余空间自适应分配。注:该列单元格已内置 `el-tooltip`(悬停显示完整 file_id),故不加 `show-overflow-tooltip`避免两个 tooltip 冲突。
 - **验证**:`npm run build` DONE + GetProblems 无错;纯前端,浏览器 Ctrl+F5 生效,无需重启后端。
 
+### 2026-09-30 · 修复 · 图片库刷新时页面/滚动条上下抖动
+- **现象**:刷新(或切页)时整页抖动、右侧滚动条上下跳。
+- **根因**:`loadThumbs()` 一次性发 limit(最多100/200)个预览请求,每个响应回来都 `this.$set(this.tableData, idx, {...整行})` 替换行对象。el-table 见行引用变化→当新行重渲染 + 触发 `doLayout` 重算表体高度与滚动条槽宽。~100 个响应陆续到达 = 上百次重排 → 表格内滚动条 + 页面滚动条被反复重算,表现为抖动。
+- **修法**:`_thumb` 在 getList 建表时已初始化为 `''`(响应式),改为**原地赋值** `this.tableData[idx]._thumb = ...`,只重渲染该单元格;占位块与真图同为 72x72 不改变行高→不触发 doLayout。另加 `_thumbGen` 代次标记 + 行 id 校验,防止快速刷新时上一批在途响应写错行。
+- **验证**:`npm run build` DONE + GetProblems 无错;纯前端,Ctrl+F5 生效。
+- **通用教训**:el-table 固定高度下,高频异步回写行数据时**绝不要替换整行对象**(会带 doLayout 风暴),字段建表时就初始化好、后续原地改属性。
+
+### 2026-09-30 · 修复 · 命令菜单页富文本工具栏补「⏎分段」按钮
+- **背景**:用户发现命令菜单(tgCommand)编辑弹窗的富文本工具栏少了分段按钮。根因:2026-09-30 新增「⏎分段」时只加了 tgMenu 三处工具栏 + tgUser/tgChat 发消息工具栏,命令页 tgCommand 两处(richCmd 菜单引导语 / richText 回复文案)漏加。
+- **改动**:`web/admin/src/views/tgCommand/index.vue` — 两处工具栏均在「🔗链接」与「👁 预览」之间插 `⏎分段` 按钮;新增 `insertBreak(refName)` 方法(与 tgUser 一致,写回 `cfg.text`,光标处插 `\n\n`)。
+- **验证**:`npm run build` DONE + GetProblems 无错;纯前端,Ctrl+F5 生效。现在 5 处文案字段(菜单 3 + 用户/群发消息 + 命令 2)分段能力全对齐。
+
 ### 运维备忘
 - **端口占用**:调试残留的 `tgbot.exe` 会占 8200,报 `bind ... Only one usage of each socket address`;`Stop-Process -Name tgbot` 释放。
 - **单实例**:getUpdates 长轮询同一 bot **同时只能跑一个进程**,否则抢更新 + 撞端口;调试固定用 GoLand 的 Run。

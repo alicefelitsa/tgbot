@@ -103,6 +103,7 @@
                 <span class="rb" @click="insertTag('richCmd','<code>','</code>')">代码</span>
                 <span class="rb" @click="insertTag('richCmd','<span class=&quot;spoiler&quot;>','</span>')">剧透</span>
                 <span class="rb" @click="insertLink('richCmd')">🔗链接</span>
+                <span class="rb" @click="insertBreak('richCmd')">⏎分段</span>
                 <span class="rb rb-preview" @click="previewVisible=true">👁 预览</span>
               </div>
               <el-input ref="richCmd" type="textarea" :rows="4" v-model="cfg.text" placeholder="显示在九宫格按钮上方（默认「请选择：」）"></el-input>
@@ -126,6 +127,7 @@
               <span class="rb" @click="insertTag('richText','<code>','</code>')">代码</span>
               <span class="rb" @click="insertTag('richText','<span class=&quot;spoiler&quot;>','</span>')">剧透</span>
               <span class="rb" @click="insertLink('richText')">🔗链接</span>
+              <span class="rb" @click="insertBreak('richText')">⏎分段</span>
               <span class="rb rb-preview" @click="previewVisible=true">👁 预览</span>
             </div>
             <el-input ref="richText" type="textarea" :rows="4" v-model="cfg.text" placeholder="发送的固定文案"></el-input>
@@ -354,6 +356,19 @@ export default {
         const open = '<a href="' + value + '">'
         this.cfg.text = val.slice(0, start) + open + sel + '</a>' + val.slice(end)
       }).catch(() => {})
+    },
+    // 在光标处插入一个空行(段落分隔):Telegram 不支持行距,只能靠空行把长段落拆成几小段拉开间距
+    insertBreak(refName) {
+      const el = this._richEl(refName)
+      if (!el) return
+      const end = el.selectionEnd || 0
+      const val = this.cfg.text || ''
+      this.cfg.text = val.slice(0, end) + '\n\n' + val.slice(end)
+      this.$nextTick(() => {
+        el.focus()
+        const p = end + 2
+        try { el.setSelectionRange(p, p) } catch (e) {}
+      })
     },
     buildActionConfig() {
       const t = this.form.action_type

@@ -184,12 +184,18 @@ export default {
       }
     },
     // 逐行拉预览图(后端用 file_id 通过 Telegram getFile 下载转 base64)
+    // 注意:_thumb 在 getList 建表时已初始化为 ''(响应式),这里直接改属性即可。
+    // 切勿用 $set 替换整行对象——那会让 el-table 把行当新行重渲染并触发 doLayout 重算滚动条,
+    // 上百个预览响应陆续回来 = 上百次重排 = 刷新时页面/滚动条上下抖动。占位块与真图同为 72x72,原地改不改变行高。
     loadThumbs() {
+      const gen = this._thumbGen = (this._thumbGen || 0) + 1 // 代次标记:getList 重跑后丢弃上一批在途响应,避免写错行
       this.tableData.forEach((row, idx) => {
         getTgImagePreview(row.id).then(res => {
+          if (gen !== this._thumbGen) return
           if (res.data.code === 0 && res.data.data) {
             const {mime, base64} = res.data.data
-            this.$set(this.tableData, idx, {...this.tableData[idx], _thumb: `data:${mime};base64,${base64}`})
+            const target = this.tableData[idx]
+            if (target && target.id === row.id) target._thumb = `data:${mime};base64,${base64}`
           }
         }).catch(() => {})
       })
