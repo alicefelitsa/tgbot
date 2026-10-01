@@ -392,7 +392,7 @@ server:
 # ===========================
 mysql:
   # 数据库地址
-  address: "82.158.225.190:3306"
+  address: "94.103.6.74:3306"
   # 数据库名称
   database: "tgbot"
   # 数据库用户
@@ -1394,6 +1394,7 @@ export function syncTgCommand()      { return request.post('/SyncTgCommand') }
   - **调整(同日):全局统一——抽出 `tableAutoHeight` mixin 应用到所有列表页**:用户要求“整个后台表格高度都改成运行时动态计算”。新建 `web/admin/src/mixins/tableAutoHeight.js`——`data.tableHeight`(初值400) + `setTableHeight()`(`$nextTick` 里 `getBoundingClientRect().top` 量表格顶部位置,再**累加表格后续同父兄弟元素(分页条)高度+margin**,`tableHeight = Math.max(240, innerHeight - top - below - 24)`),`mounted` 挂 `resize` 监听、`beforeDestroy` 摘除。因同时量 top 与 below(分页条),**带分页(tgUser/tgChat/tgImage)与无分页(tgMenu/tgCommand)均自适应**,不再需为无分页页单独记偏移。接入方式:每页 `mixins: [tableAutoHeight]` + 表格 `ref="table" :height="tableHeight"`(前提:表格 ref 必为 table、且与分页条同为 el-card body 直接子元素)。tgMenu 删内联的动态逻辑改用它。注:sysSetting 无表格不受影响。验证:`npm run build` 过、GetProblems 无错;纯前端,Ctrl+F5 生效。
   - **新增(同日):自建两个 Mock 调试接口,免依赖第三方**:用户调试 pick_user/http 时发现第三方 mock 站 `jsonplaceholder.typicode.com` 的 **POST 写接口返回 404/500**(GET 仍 200),导致“转账”类 POST 流程一直报“暂时取不到数据”。为稳定联调,在自家后端挂两个不鉴权的测试接口。新建 `controller/mockController.go`:`MockGet`(GET `/api/test/get`,**把收到的查询参数原样放进 `data` 回显**)、`MockPost`(POST `/api/test/post`,**把收到的 JSON body 原样放进 `data` 回显、不额外加任何字段**,`code`/`message` 固定为 0/ok,**恒返回 200**,非法 JSON 则把原文字符串当 `data` 原样回传)。`route/route.go` 加公开组 `test := router.Group("/api/test")` 挂这两条(不挂 BossAuth)。`validTgURL` 只校验 scheme(http/https)+ASCII 主机名,故 `http://127.0.0.1:8200/api/test/xxx` 可通过、bot 自调本机端口无碍。验证:`go build ./...` + `go vet` 过、GetProblems 无错。**含后端改动,需重启后端生效**。
   - **修复(同日):GET 接口地址把含空格/中文的变量值 URL 编码**:用户配 `http://bot-tg.cc/api/test/get?uid={uid}&name={first_name}&username={username}` 报“暂时取不到数据”。实测坐实(直 curl 该域名):name 带空格→`[000]`请求根本发不出、带中文→`[400]`、纯 ASCII→`[200]`正常。根因:`httpResult`/`bannerAPIText` 渲染接口地址时用的是 `httpRender`——**将变量值原样字符串替换进 URL、不做任何编码**,而 `{first_name}` 等自由文本常含空格/非 ASCII,拼出的 URL 非法 → `http.NewRequest` 的 `url.Parse` 报错 → httpFetch 返回 false → fail。修:`tgHTTP.go` 新增 `httpRenderURL`(与 `httpRender` 同逻辑,但用 `url.QueryEscape` 对**每个被替换进去的变量值**做编码,仅作用于替换值、模板里的 `?&=` 结构字符不动),并把两处接口地址渲染(`httpResult` 的 `urlTpl`、`bannerAPIText` 的 `api_url`)改用它。纯 ASCII 常规值(uid/数字/无特殊字符 username)编码后不变,零回归。验证:`go build ./...` + `go vet` 过。**含后端改动,需重启后端生效**。（临时诊断产物无、未新增文件。）
+  - **变更(同日):MySQL 数据库地址改为 `94.103.6.74:3306`**:用户新换一台数据库、以后用新的。`config.yaml` 的 `mysql.address` 由 `82.158.225.190:3306` 改为 `94.103.6.74:3306`(库/用户/密码不变,文档 §6.1 配置样例同步)。验证:写临时 Go 程序用项目 `go-sql-driver/mysql` 驱动直连——TCP 3306 可达(Ping 因服务器禁 ICMP 失败属正常)、认证通过、**MySQL 8.4.11**、`tgbot` 库 8 表、`tg_menu`=28/`admin`=1/`tg_user`=3/`sys_setting`=4(数据已存在、非空库);临时程序与目录已删、复查无残留。**需重启后端才会连新库**(旧进程仍连老地址)。注:GoLand Database 面板的 `tgbot` Data Source 是独立配置,需手动改,未随本次变更。
 
 ### 运维备忘
 - **端口占用**:调试残留的 `tgbot.exe` 会占 8200,报 `bind ... Only one usage of each socket address`;`Stop-Process -Name tgbot` 释放。
