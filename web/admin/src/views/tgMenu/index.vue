@@ -66,7 +66,11 @@
         <el-table-column label="每行" width="60px" align="center">
           <template v-slot="{row}">{{ isFolder(row) ? row.cols : (Number(row.cols) === 1 ? '整行' : '—') }}</template>
         </el-table-column>
-        <el-table-column prop="sort" label="排序" width="70px" align="center"></el-table-column>
+        <el-table-column prop="sort" label="排序" width="90px" align="center">
+          <template v-slot="{row}">
+            <el-input-number v-model="row.sort" size="mini" :min="0" :controls="false" style="width:56px;" @change="saveSort(row)"></el-input-number>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="80px" align="center">
           <template v-slot="{row}">
             <el-switch :value="row.status === 1" active-color="#13ce66" @change="toggleStatus(row)"></el-switch>
@@ -238,18 +242,7 @@
           <el-input-number v-model="form.cols" :min="1" :max="6" style="width:100%;"></el-input-number>
           <div class="form-tip">这个文件夹展开后，子按钮每行排几个。</div>
         </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="排序">
-              <el-input-number v-model="form.sort" :min="0" style="width:100%;"></el-input-number>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="状态">
-              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-color="#13ce66"></el-switch>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <!--排序、状态不在此设置:改到表格列表里直接改(排序列可编辑、状态列可点开关),弹窗只留内容配置-->
       </el-form>
       <span slot="footer" class="dialog-footer">
         <el-button @click="dialogVisible=false" size="small">取 消</el-button>
@@ -679,6 +672,20 @@ export default {
         if (res.data.code === 0) {
           row.status = row.status === 1 ? 0 : 1
           this.$message.success(res.data.message)
+        } else {
+          this.$message.error(res.data.message)
+        }
+      } catch (e) {
+        this.$message.error(e.message)
+      }
+    },
+    // 表格内直接改排序:仅提交 id+sort 局部更新,成功后重拉以按新 sort 重排树序
+    async saveSort(row) {
+      const payload = {id: row.id, sort: row.sort}
+      try {
+        const res = await saveTgMenu(payload)
+        if (res.data.code === 0) {
+          await this.loadMenus()
         } else {
           this.$message.error(res.data.message)
         }
