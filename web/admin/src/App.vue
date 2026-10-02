@@ -83,15 +83,29 @@ input, textarea, select, button {
 .el-dialog__header {
   padding: 15px !important;
   border-bottom: 1px solid #eee;
+  flex-shrink: 0; /* 限高时不被压缩,标题始终完整可见 */
+}
+
+/* 笔记本等矮屏兼容:弹窗整体限高 86vh(最大 top 12vh + 86vh + 底部留白 < 100vh),
+   改 flex 纵向布局让 body 内部滚动,标题栏与底部按钮始终可见,不再撑出页面滚动条 */
+.el-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  margin-bottom: 0 !important; /* Element 默认底部 50px 外边距会把 wrapper 撑出页面滚动条(弹窗限高后属多余) */
 }
 
 .el-dialog__body {
   padding: 30px 20px 10px !important;
+  flex: 1 1 auto;
+  min-height: 0; /* flex 子项允许收缩,否则内容超高时撑破不出滚动条 */
+  overflow-y: auto;
 }
 
 .el-dialog__footer {
   padding: 15px !important;
   border-top: 1px solid #eee;
+  flex-shrink: 0; /* 限高时不被压缩,确定/取消按钮始终可见 */
 }
 
 .query-form-inline > .el-form-item {
@@ -124,6 +138,11 @@ input, textarea, select, button {
 
 .el-image {
   overflow: clip !important;
+}
+
+/* 顶部轻提示(如长文案报错):Element 默认行高≈字号,长文案换行后挤成一块;加行距减轻阅读负担 */
+.el-message__content {
+  line-height: 1.7 !important;
 }
 
 /* 渐隐渐现的极细滚动条 */

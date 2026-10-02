@@ -492,7 +492,8 @@ export default {
 }
 .uploader >>> .el-upload-dragger {
   width: 100%;
-  height: 172px;
+  /* 笔记本矮屏兼容:拖拽区高度随视口收缩,配合弹窗 86vh 限高不出 body 滚动条 */
+  height: min(172px, 20vh);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -548,8 +549,8 @@ export default {
   grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: 10px;
   align-content: start;
-  /* 固定高度:选图过多时网格内部滚动,不把弹窗/页面撑高(顶部留 8px 防左上角 ✕ 角标被裁) */
-  max-height: 320px;
+  /* 高度随视口自适应(封顶 320px):选图过多时网格内部滚动,不把弹窗/页面撑高(顶部留 8px 防左上角 ✕ 角标被裁) */
+  max-height: min(320px, 24vh);
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 12px 4px 2px;

@@ -34,8 +34,8 @@
       <el-table ref="table" class="tableData" :data="displayData" :height="tableHeight"
                 :border="true" v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" align="center"></el-table-column>
-        <el-table-column prop="id" label="ID" width="80px" align="center"></el-table-column>
-        <el-table-column label="菜单名称" width="260px" class-name="col-title">
+        <el-table-column prop="id" label="ID" width="60px" align="center"></el-table-column>
+        <el-table-column label="菜单名称" width="210px" class-name="col-title">
           <template v-slot="{row}">
             <div class="tree-cell">
               <span v-for="(cont, j) in (row.__ancLast || [])" :key="'a' + j"
@@ -55,12 +55,12 @@
         <el-table-column v-if="searching" label="上级菜单" width="160px" align="center" show-overflow-tooltip>
           <template v-slot="{row}">{{ parentLabel(row.parent_id) }}</template>
         </el-table-column>
-        <el-table-column prop="action_type" label="点击行为" width="100px" align="center">
+        <el-table-column prop="action_type" label="点击行为" width="90px" align="center">
           <template v-slot="{row}">
             <el-tag size="mini" :type="actionTagType(row.action_type)" :class="{ 'tag-http': row.action_type === 'http', 'tag-menu': row.action_type === 'menu', 'tag-url': row.action_type === 'url' }">{{ actionLabel(row.action_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="点击后效果" min-width="240px" show-overflow-tooltip>
+        <el-table-column label="点击后效果" min-width="180px" show-overflow-tooltip>
           <template v-slot="{row}">{{ configSummary(row) }}</template>
         </el-table-column>
         <el-table-column label="每行" width="60px" align="center">
@@ -76,7 +76,7 @@
             <el-switch :value="row.status === 1" active-color="#13ce66" @change="toggleStatus(row)"></el-switch>
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="left" width="180px">
+        <el-table-column label="操作" align="left" :width="actionColWidth">
           <template v-slot="{row}">
             <el-button size="mini" @click="edit(row)">编辑</el-button>
             <el-button v-if="isFolder(row)" size="mini" type="text" @click="add(row.id)">添加子菜单</el-button>
@@ -305,6 +305,11 @@ export default {
     // 是否有展开的节点(控制“全部展开/折叠”按钮文案)
     hasExpanded() {
       return this.expandedIds.length > 0
+    },
+    // 操作列宽:仅当当前列表存在“文件夹”行(才会多出一个“添加子菜单”按钮)时留 180px,
+    // 否则(如按 text/url/http 等筛选、每行只剩“编辑”)收窄为 90px,避免右侧大片留白
+    actionColWidth() {
+      return this.displayData.some(r => this.isFolder(r)) ? '180px' : '90px'
     },
     // 表格数据:有搜索词或选了点击行为→列出所有匹配(平铺);否则→按展开状态把树拍平成带层级的行
     displayData() {
@@ -645,9 +650,9 @@ export default {
             await this.$confirm('这个菜单设为「展开子菜单」，但它下面还没有任何子菜单，用户点开会是没有按钮的空页。建议先给它「添加子菜单」，或把「点击行为」改成「返回」（回上一级/根菜单）。仍要保存吗？', '逻辑提醒', {type: 'warning', confirmButtonText: '仍要保存', cancelButtonText: '返回修改'})
           } catch (e) { return }
         } else if (!nowFolder && kids > 0) {
-          try {
-            await this.$confirm('这个菜单下还有 ' + kids + ' 个子菜单，但当前设置点击后不会展示子菜单，这些子菜单将无法被点到。建议把「点击行为」保持为「菜单导航」（展开子菜单）。仍要保存吗？', '逻辑提醒', {type: 'warning', confirmButtonText: '仍要保存', cancelButtonText: '返回修改'})
-          } catch (e) { return }
+          // 硬拦截:改了行为后子菜单在 TG 端永远点不到成死数据,必须先删除或改挂子菜单
+          this.$message.error('无法保存：这个菜单下还有 ' + kids + ' 个子菜单，改成其他点击行为后它们将无法被点到。请先删除这些子菜单，或编辑子菜单把它们改挂到其他「菜单导航」下，再来修改。')
+          return
         }
       }
       const payload = {...this.form, action_config: this.buildActionConfig()}

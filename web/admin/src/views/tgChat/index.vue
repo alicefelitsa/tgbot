@@ -72,7 +72,7 @@
 
     <!--主动发消息(群发到群组)-->
     <el-dialog title="发送消息到群组" :visible.sync="sendVisible" width="680px" top="10vh"
-               class="responsive-dialog" :close-on-click-modal="false">
+               class="responsive-dialog send-dialog" :close-on-click-modal="false">
       <el-form :model="sendForm" label-width="90px">
         <el-form-item label="发送对象">
           <span style="color:#606266;">已勾选 <b style="color:#409EFF;">{{ sendForm.count }}</b> 个群组/频道</span>
@@ -314,6 +314,11 @@ export default {
 </script>
 
 <style scoped>
+/* 笔记本矮屏兼容:消息文本框高度随视口自适应(不再固定 rows=10 撑高),保证弹窗在 86vh 限高内不出内容滚动条 */
+.send-dialog >>> .el-textarea__inner {
+  height: clamp(130px, calc(86vh - 360px), 280px);
+}
+
 .form-tip {
   color: #909399;
   font-size: 12px;
